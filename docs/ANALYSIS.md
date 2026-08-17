@@ -1,10 +1,21 @@
-# How the Info > All hang was found, and why the fix is safe
+# How both hangs were found, and why the fixes are safe
 
-Technical write-up of the crash in the NoPrgress DQ6 translation, and of the
-three-byte restoration that fixes it.
+Technical write-up of two crashes in the NoPrgress DQ6 translation.
+
+- **Part one, below:** the **Info > All** hang, and the three-byte restoration
+  that fixes it. Shipped in v1 and v2.
+- **[Part two](#part-two-the-forget-crash):** the **Forget** crash, and the
+  variable relocation that fixes it. Shipped in v2 only.
+
+The two are unrelated defects with different shapes. The first is a deleted
+instruction. The second is a memory allocation collision, in which every
+instruction on the fault path is byte-identical to the Japanese original and the
+defect is in *where* the translation put its data.
 
 Measured facts and inferences are labelled separately throughout. Where
-something is a guess, it says so.
+something is a guess, it says so. The refuted hypotheses are kept: they were
+most of the work, and a write-up showing only the path that worked would be a
+worse document.
 
 Addresses are SNES addresses. The ROM is **HiROM**, headerless, 4 MiB, so file
 offset `N` maps to `$C0+(N>>16):N&FFFF`.
@@ -336,3 +347,300 @@ behaviour, which is the loop stopping at the real end of the party.
 Verified on one ROM and one emulator, at **two party sizes**: a solo level 1
 character and a full eight-member party, neither of which hangs. **Not**
 verified across a full playthrough, or on emulators other than MesenCE.
+
+---
+
+# Part two: the Forget crash
+
+Shipped in **v2 only**.
+
+Using **Forget** in the Remember conversation system produces jumbled repeating
+text, then a black screen, and the game does not recover.
+
+It looks intermittent. It is not. It is deterministic, and what varies is
+whether one of the original game's periodic memory clears happens to land in the
+middle of a message.
+
+---
+
+## 1. The collision
+
+The translation keeps its word-wrap state in three variables:
+
+```
+$7E:379E    a width accumulator      5 instruction sites
+$7E:37A0    the buffer length        8 instruction sites
+$7E:37A2    the buffer itself        6 instruction sites
+```
+
+All three sit inside a 112-byte block at `$7E:3768`-`$37D6` that belongs to the
+original game. That block is a **bitfield**, and a live one:
+
+```
+$C3:11DE   LSR / LSR / LSR / TAX     ; index divided by 8 -> byte offset
+$C3:11EE   LDA $3768,X / AND $FC31   ; test a bit
+$C3:1815   LDX #$FFFE
+$C3:1818   INX / INX
+$C3:181A   LDA $3768,X / BEQ $1818   ; scan for the first non-empty word
+$C3:1825   LSR / LSR / STA $3AE0     ; convert back to an index
+```
+
+112 bytes, so 896 bits. It has four users, `$C3:11EE`, `$C3:181A`, `$C3:787B`
+and `$C5:CF90`, and **all four are Enix code, byte-identical to the Japanese
+ROM.** The value `$C3:1825` produces feeds `$3AE0`, which `$C3:7B25` reads to
+set the party-slot index, so this bitfield is live on exactly the screens where
+messages appear.
+
+Three block clears own it, with their bounds read off the instruction rather
+than inferred:
+
+```
+$C3:7878   LDX #$006E / STZ $3768,X / DEX x2    clears $7E:3768-$37D7
+$C5:CF8D   LDX #$006E / STZ $3768,X / DEX x2    clears $7E:3768-$37D7
+$C5:CF97   LDX #$006E / STZ $37D8,X / DEX x2    clears $7E:37D8-$3847
+```
+
+A second 112-byte block butts directly against the first, so there is no unused
+tail to borrow at either end. The translation's buffer had **54 bytes** before
+it ran into that second block.
+
+**This is the whole defect.** A clear fires, the buffer and its length are
+zeroed underneath a live cursor, and the message machinery carries on as though
+nothing happened.
+
+---
+
+## 2. The chain
+
+Nine steps from the clear to the black screen, each measured in a trace rather
+than reasoned about:
+
+1. A block clear fires mid-message and zeroes the length at `$7E:37A0` and the
+   buffer at `$7E:37A2`.
+2. The replay loop's bound is now `$0000` while its cursor is already past it.
+3. The loop reads a buffer slot that was never written, getting `$0000`.
+4. That `$0000` reaches `$C0:29F0 SBC #$00AB`.
+5. `$0000 - $00AB` **underflows to `$FF55`**.
+6. `$FF55` is used as a table index, so the lookup reads **backwards** out of
+   the table and into the translation's own inserted routine.
+7. What it finds there is executed as an address, and the `JML` lands in **open
+   bus**.
+8. Open bus on this machine reads as `$00`, which is `BRK`. The BRK handler
+   takes a **garbage return address** off the stack.
+9. That garbage propagates into the message-ID derivation, which fabricates ID
+   **`$0AAA`**. The Huffman decoder is pointed at data that is not text, decodes
+   an endless character stream, and the screen goes black.
+
+Step 8 is worth a note. `$C5:9942` is genuinely the BRK handler: `$00:FFE6`
+holds `$FFA8`, and `$00:FFA8` holds `5C 42 99 C5`, a `JML $C59942`. But its
+first instructions are `PLP / REP #$30 / PHA / LDA $03,S / DEC / DEC /
+STA $03,S`, which is **return-address adjustment**. This engine uses `BRK #imm`
+as a compact inline-parameter call instruction, so a BRK is normal here. What is
+abnormal is reaching it from a corrupted return path.
+
+---
+
+## 3. The measured divergence
+
+The underflow at step 5 is the point where the runs separate. Counting how often
+`$C0:29F0` receives a value below `$00AB`:
+
+| run | underflows |
+|---|---|
+| Japanese ROM, same conversation | **0 of 109** |
+| Translation, healthy Forget | **0 of 9** |
+| Translation, failing Forget | **1 of 85** |
+
+One underflow in eighty-five is enough. Everything downstream is deterministic
+once it happens.
+
+---
+
+## 4. The fix
+
+Move all three variables somewhere the original game does not touch:
+
+```
+$7E:379E  ->  $7E:55BE    width      5 sites
+$7E:37A0  ->  $7E:55C0    length     8 sites
+$7E:37A2  ->  $7E:55C2    buffer     6 sites
+```
+
+Nineteen sites, thirty-eight operand bytes. **Opcodes and instruction lengths
+are unchanged**, so there is no code motion, no hook, and no ROM free space
+consumed. Every site was verified to hold its expected opcode and operand before
+anything was written.
+
+v2 also changes two branch conditions that test equality where they need an
+ordered test, so an index already past a shrunken bound could never reach the
+exit:
+
+```
+$C0:FE27   F0 -> B0    BEQ -> BCS
+$C0:FF1D   D0 -> 90    BNE -> BCC
+```
+
+Both are **no-ops on a healthy path**, where the index only ever reaches the
+bound from below. They were fixed before the root cause was found, neither
+resolved the crash alone, and they were **not individually isolated**: no build
+was made with the relocation and without them.
+
+### Choosing the destination
+
+The target had to fail four independent tests to qualify:
+
+1. **A CDL-guided static scan.** The emulator's code/data log records which ROM
+   bytes actually executed and the register widths in force, giving real
+   instruction boundaries instead of guessing code from data. 60,924
+   instructions decoded.
+2. **A trace touch map** from five clean sessions, every effective address
+   widened to two bytes.
+3. **Snapshot content:** any byte non-zero in either of two WRAM dumps.
+4. **Snapshot diff:** any byte differing between the two dumps is definitively
+   written. The dumps differ in 27.3% of WRAM, so they are genuinely different
+   game states.
+
+`$7E:55AE`-`$5689` failed all four, and its 192-byte core reads zero on every
+one of them. Of the candidates it also had by far the largest margin against
+indexed addressing reaching into it from below: an index of `$046A` would be
+needed, against `$40` and `$02` for the runners-up.
+
+For the parts of the ROM that have never executed and so cannot be classified,
+the byte-scan hit counts were compared against chance. All three finalists came
+in **below** what random data predicts (948 observed against 2,277 expected for
+this one), so those hits carry no evidence of real references.
+
+Bank `$7F` was rejected despite holding the largest free run in the machine,
+21,905 bytes. The code reaches its buffer as `STA $37A2,X` with the data bank set
+to `$7E`; reaching `$7F` needs long addressing, which is a different opcode and
+an extra byte at every site, so it stops being a drop-in.
+
+### Headroom
+
+```
+before   $37A2 -> $37D8 (the next Enix block)    54 bytes
+after    $55C2 -> $568A                         200 bytes
+worst overrun actually observed                 136 bytes
+```
+
+The old location could not contain the overspill that occurs. The new one can.
+
+---
+
+## 5. Verification
+
+Two independent traced sessions, 90 GB and 58.75 GB, the second spanning roughly
+23,000 frames on a different save. Coverage confirmed by instruction counts
+rather than assumed, and including **battle**, which was the standing gap in the
+evidence for the destination region.
+
+In both sessions: no underflow, no uninitialised slot read, no execution outside
+legitimate banks, no fabricated message ID.
+
+The strongest single result is the **lane analysis**. Across the whole second
+session, every access to the relocated region came from translation code, and
+each variable stayed in its own set of sites:
+
+```
+$55BE  width     written by $C0:FE81 FEA2         read by $C0:FE85 FE8B FEA7
+$55C0  length    written by $C0:FDD5 FDE8 FDFE
+                            FF03 FF1F             read by $C0:FDE0 FE24 FF1A
+$55C2  buffer    written by $C0:FDE3 FEF2         read by $C0:FE29 FE69 FF22 FF34
+```
+
+8,727 writes and 13,420 reads, and **zero foreign accesses**. In the other
+direction, a static scan of every instruction the translation added returns
+**zero references** into `$7E:3768`-`$3847`.
+
+One WRAM snapshot was captured mid-message and shows the relocation live: width
+`$0007`, length `$000C`, real glyph data at `$55C2`, the old slots all zero, and
+the Enix block entirely clean.
+
+---
+
+## 6. Hypotheses that were wrong
+
+Six theories were pursued and refuted by measurement. They are listed because
+each one looked right at the time.
+
+- **The accumulator-value theory.** The idea that a particular value reaching
+  `$C0:2C92` was inherently non-returning. Refuted: the Japanese run takes the
+  same path 109 times and the routine is balanced 881 entries to 881 returns.
+  The value `$00AC` strands in one run and returns in two others, so it is not
+  the discriminator.
+- **The buffer-clobbering theory, in its first form.** An ownership test asked
+  *who wrote* each byte that was read back, found every one had been written by
+  the same invocation, and concluded the content was fine. That was the **wrong
+  question**: same-invocation authorship does not imply correct content. A pass
+  that appends the wrong bytes still owns what it wrote.
+- **The re-entrancy theory.** That nested message cycles were the bug and a
+  re-entrancy guard was the fix. Refuted: the nesting is **intended by design**,
+  one cycle per prompt, and a guard would have broken the feature.
+- **The short-table theory.** That the translation's rewritten message-offset
+  table was too short and the lookup ran off the end. Measured and refuted: the
+  table covers IDs `$0000`-`$0365` and the highest ID any build legitimately
+  requests is `$030F`, comfortably inside it. The fabricated `$0AAA` was a
+  symptom, not a missing entry.
+- **The `$C6:FDF6 CMP #$09A7` threshold theory.** That a translation-added
+  threshold was misclassifying message IDs. It is on a different path entirely,
+  the name-buffer builder, not the message-table lookup.
+- **Three branch-condition fixes.** Each corrected a real defect, and none fixed
+  the crash. The lesson is the useful part: **no comparison can recover state
+  that unrelated code has already deleted.** Each fix moved the symptom to the
+  next exit. Two of them ship in v2 anyway, because they are correct and
+  harmless; the third would have been neither.
+
+---
+
+## 7. Measurement errors made along the way
+
+Two of these produced confident, wrong, published-to-the-notes conclusions.
+
+- **The touch map recorded only base effective addresses.** The emulator prints
+  one address per memory access and leaves the width to the processor status
+  flags, so every 16-bit access left its high byte looking untouched. That
+  produced a neat alternating pattern which was duly reported as "a 16-bit
+  strided structure with only the odd halves untouched". It was an artefact of
+  the extraction. Widening every access to two bytes removes it. This single bug
+  produced a false negative that concluded **no safe memory existed anywhere**,
+  when in fact bank `$7F` alone had a 21,905-byte free run.
+- **Block-clear bounds were capped at 2048 bytes** by the analysis code, so
+  `$C2:3467 LDX #$07CE / STZ $2030,X` appeared to stop short of its real extent,
+  `$7E:2030`-`$27FF`. Read the bound off the instruction. Never cap it.
+- **A crashed run was nearly used as evidence of normal memory use.** The failing
+  session touched 122,079 of 131,072 bytes, 93% of all work RAM, because it was
+  executing through wild banks. Counting it would have marked essentially
+  everything as owned.
+- **Absolute stores to `$4300`-`$4325` are DMA register writes, not memory
+  writes.** Any map that assumes the data bank is `$7E` everywhere will mark the
+  `$2100`-`$43FF` window owned for no reason.
+- **A third variable was missed on the first pass.** `$7E:379E` was found only
+  after a full trace of the first relocation build, because the search looked
+  for the two addresses already known instead of scanning the range. The correct
+  query is: scan every instruction the translation added for **any** operand in
+  `$7E:3768`-`$3847`. That returns exactly three variables, and it agrees with
+  what the trace observed executing.
+
+There is also a standing methodology note from part one that applies here too:
+the emulator prints the **pre-write** value for stores, and the value actually
+written is in the `A` column. An `STZ` displaying a non-zero value is the proof.
+
+---
+
+## 8. What this does not fix
+
+**The unbounded fill at `$C0:FDD8`-`$C0:FDF0` is still there.** The loop appends
+while a condition holds, with no length cap, and was measured writing 136 bytes
+past the buffer base.
+
+v2 **contains** this rather than fixing it. The relocation gives the buffer 200
+bytes of headroom instead of 54, so the overspill no longer lands on live game
+state. That is a real difference in outcome and not a real fix to the loop.
+
+No test session ever triggered the overrun: the longest session's highest write
+was 26 bytes past the base, leaving 174 of the 200 bytes untouched. So the
+sessions demonstrate correct operation, and they do **not** demonstrate that the
+containment works, because it was never called on. This is why the README
+suggests savestates the first time you use Forget.
+
+The unbounded loop is listed as an open defect.

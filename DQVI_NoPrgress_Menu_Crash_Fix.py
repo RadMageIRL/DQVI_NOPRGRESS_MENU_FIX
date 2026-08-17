@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Fix the Info > All hang in the NoPrgress English translation of
+"""Fix two crashes in the NoPrgress English translation of
 Dragon Quest VI: Maboroshi no Daichi (Super Famicom).
 
+v1, the default, fixes Info > All only
+--------------------------------------
 The translation is missing a three-byte instruction, STA $3AC2 at $C3:3538,
 that the Japanese original executes. Without it a party-slot loop keeps a
 sentinel bound of 0xFF, walks into a slot that was never populated, and trips
@@ -9,9 +11,22 @@ an assertion the original developers left in the game: an infinite self-branch
 at $C4:560F. The visible symptom is a hard hang when you open Info > All and
 back out before the screen finishes drawing.
 
-This script restores the missing instruction by copying an 87-byte span from
-the Japanese ROM over the corresponding span in the translated ROM, then
-recomputes the SNES internal checksum.
+The fix restores the missing instruction by copying an 87-byte span from the
+Japanese ROM over the corresponding span in the translated ROM.
+
+v2, with --version 2, also fixes the Forget crash
+-------------------------------------------------
+The translation keeps word-wrap state in three variables that sit inside a
+112-byte block the original game clears wholesale. When a clear lands in the
+middle of a message, the buffer and its length are destroyed underneath a live
+cursor, and the resulting chain ends in a black screen. The fix moves those
+three variables somewhere the original game does not touch. It changes operands
+only: same opcodes, same instruction lengths, no new code.
+
+v2 is a superset of v1 but the two patches are NOT stackable. Both start from
+the unmodified translated ROM.
+
+Both versions recompute the SNES internal checksum.
 
 No ROM is distributed with this script. You supply both of them.
 
@@ -64,9 +79,62 @@ HDR = 0xFFC0                        # internal header, HiROM
 HDR_COMPLEMENT = HDR + 0x1C         # 0xFFDC
 HDR_CHECKSUM = HDR + 0x1E           # 0xFFDE
 
+# ---------------------------------------------------------------------------
+# v2 only: the Forget fix.
+#
+# The translation keeps word-wrap state in three variables at $7E:379E, $37A0
+# and $37A2. All three sit inside the 112-byte block at $7E:3768-$37D6 that the
+# original game clears wholesale, so a clear landing mid-message destroys the
+# buffer and its length underneath a live cursor. See docs/ANALYSIS.md.
+#
+# The fix moves all three into a region established as unused, and is purely a
+# change of operands: same opcodes, same instruction lengths, no new code, no
+# hook, and no ROM free space consumed.
+# ---------------------------------------------------------------------------
+
+NEW_WIDTH = 0x55BE                  # was $379E
+NEW_LENGTH = 0x55C0                 # was $37A0
+NEW_BUFFER = 0x55C2                 # was $37A2
+
+# (file offset, opcode, operand before, operand after, what it is)
+V2_RELOCATIONS = (
+    (0x00FDD5, 0x9C, 0x37A0, NEW_LENGTH, "STZ length"),
+    (0x00FDE0, 0xAE, 0x37A0, NEW_LENGTH, "LDX length"),
+    (0x00FDE8, 0x8E, 0x37A0, NEW_LENGTH, "STX length"),
+    (0x00FDFE, 0x8E, 0x37A0, NEW_LENGTH, "STX length"),
+    (0x00FE24, 0xEC, 0x37A0, NEW_LENGTH, "CPX length"),
+    (0x00FF03, 0x8E, 0x37A0, NEW_LENGTH, "STX length"),
+    (0x00FF1A, 0xEC, 0x37A0, NEW_LENGTH, "CPX length"),
+    (0x00FF1F, 0x9C, 0x37A0, NEW_LENGTH, "STZ length"),
+    (0x00FDE3, 0x9D, 0x37A2, NEW_BUFFER, "STA buffer,X"),
+    (0x00FE29, 0xBD, 0x37A2, NEW_BUFFER, "LDA buffer,X"),
+    (0x00FE69, 0xBD, 0x37A2, NEW_BUFFER, "LDA buffer,X"),
+    (0x00FEF2, 0x9D, 0x37A2, NEW_BUFFER, "STA buffer,X"),
+    (0x00FF22, 0xBD, 0x37A2, NEW_BUFFER, "LDA buffer,X"),
+    (0x00FF34, 0xBD, 0x37A2, NEW_BUFFER, "LDA buffer,X"),
+    (0x00FE81, 0x8D, 0x379E, NEW_WIDTH,  "STA width"),
+    (0x00FE85, 0xCD, 0x379E, NEW_WIDTH,  "CMP width"),
+    (0x00FE8B, 0xED, 0x379E, NEW_WIDTH,  "SBC width"),
+    (0x00FEA2, 0x8D, 0x379E, NEW_WIDTH,  "STA width"),
+    (0x00FEA7, 0x6D, 0x379E, NEW_WIDTH,  "ADC width"),
+)
+
+# Two branch conditions that test equality where they need an ordered test, so
+# an index already past a shrunken bound can never reach the exit. Both are
+# no-ops on a healthy path, where the index only ever reaches the bound from
+# below. (file offset, byte before, byte after, description)
+V2_BRANCHES = (
+    (0x00FE27, 0xF0, 0xB0, "$C0:FE27  BEQ -> BCS"),
+    (0x00FF1D, 0xD0, 0x90, "$C0:FF1D  BNE -> BCC"),
+)
+
 OUT_ROM = "DQVI_NoPrgress_MenuFix.sfc"
 OUT_BPS = "dqvi-noprgress-menufix-v1.bps"
 OUT_IPS = "dqvi-noprgress-menufix-v1.ips"
+
+OUT_ROM_V2 = "DQVI_NoPrgress_MenuFix_v2.sfc"
+OUT_BPS_V2 = "dqvi-noprgress-menufix-v2.bps"
+OUT_IPS_V2 = "dqvi-noprgress-menufix-v2.ips"
 
 
 class Fail(Exception):
@@ -176,8 +244,48 @@ def load_rom(path, want_sha1, want_crc32, label, other_sha1, other_label):
 # The fix
 # ---------------------------------------------------------------------------
 
-def apply_fix(jp, en):
+def check_v2_sites(en):
+    """Verify every v2 site holds exactly what we expect before writing.
+
+    A mistyped operand here would point live code at a live address, and the
+    resulting failure would look like a new bug rather than a typo.
+    """
+    problems = []
+    for off, opcode, before, _after, what in V2_RELOCATIONS:
+        got_opcode = en[off]
+        got_operand = en[off + 1] | (en[off + 2] << 8)
+        if got_opcode != opcode or got_operand != before:
+            problems.append(
+                "  0x{:06X} ({}): expected opcode {:02X} operand ${:04X}, "
+                "found {:02X} ${:04X}".format(
+                    off, what, opcode, before, got_opcode, got_operand))
+    for off, before, _after, what in V2_BRANCHES:
+        if en[off] != before:
+            problems.append(
+                "  0x{:06X} ({}): expected {:02X}, found {:02X}".format(
+                    off, what, before, en[off]))
+    if problems:
+        raise Fail(
+            "the Forget-fix sites do not contain the expected bytes:\n{}\n"
+            "  Refusing to write.".format("\n".join(problems)))
+
+
+def apply_v2(out):
+    """Apply the Forget fix in place. Sites are verified before this is called."""
+    for off, _opcode, _before, after, _what in V2_RELOCATIONS:
+        out[off + 1] = after & 0xFF
+        out[off + 2] = (after >> 8) & 0xFF
+    for off, _before, after, _what in V2_BRANCHES:
+        out[off] = after
+
+
+def apply_fix(jp, en, version=1):
     """Return the fixed image. Neither input is touched."""
+    if version not in (1, 2):
+        raise Fail("unknown version {!r}".format(version))
+    if version == 2:
+        check_v2_sites(en)
+
     if en[SPAN_START:SPAN_END] != SPAN_BEFORE:
         raise Fail(
             "the span at 0x{:06X}-0x{:06X} does not contain the expected "
@@ -200,6 +308,9 @@ def apply_fix(jp, en):
 
     out = bytearray(en)
     out[SPAN_START:SPAN_END] = jp[SPAN_START:SPAN_END]
+
+    if version == 2:
+        apply_v2(out)
 
     checksum, complement = snes_checksum(out)
     write_checksum(out, checksum, complement)
@@ -422,19 +533,33 @@ why no ROMs are included
   NoPrgress's work to distribute, not ours. This repository carries only the
   difference between their ROM and a fixed one.
 
+which version
+-------------
+  --version 1  (default)  Info > All only. The conservative option: it restores
+                          deleted bytes so the routine matches the Japanese
+                          original exactly, and changes nothing else.
+  --version 2             Also fixes the Forget crash. This one relocates
+                          word-wrap state to a region established as unused by
+                          static and dynamic analysis. See docs/ANALYSIS.md for
+                          the evidence and the residual risk.
+
+  The two patches are NOT stackable. Both apply to the unmodified translated
+  ROM. Do not apply v2 on top of a v1 output.
+
 example
 -------
   python DQVI_NoPrgress_Menu_Crash_Fix.py \\
       --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" \\
-      --en "Dragon Quest VI - Realms of Revelation.sfc"
+      --en "Dragon Quest VI - Realms of Revelation.sfc" \\
+      --version 2
 """
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="DQVI_NoPrgress_Menu_Crash_Fix.py",
-        description="Restore the missing STA $3AC2 that causes the Info > All "
-                    "hang in the NoPrgress DQ6 translation.",
+        description="Fix the Info > All hang, and optionally the Forget crash, "
+                    "in the NoPrgress DQ6 translation.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--jp", required=True, metavar="FILE",
@@ -447,17 +572,25 @@ def main(argv=None):
                         help="directory for outputs (default: alongside --en)")
     parser.add_argument("--no-patches", action="store_true",
                         help="write only the fixed ROM, no BPS or IPS")
+    parser.add_argument("--version", type=int, choices=(1, 2), default=1,
+                        metavar="N",
+                        help="1 = Info > All only (default, the conservative "
+                             "option); 2 = also fix the Forget crash")
     args = parser.parse_args(argv)
 
     outdir = args.outdir
     if outdir is None:
         outdir = os.path.dirname(os.path.abspath(args.en))
 
-    out_rom = args.out or os.path.join(outdir, OUT_ROM)
-    out_bps = os.path.join(outdir, OUT_BPS)
-    out_ips = os.path.join(outdir, OUT_IPS)
+    v2 = args.version == 2
+    out_rom = args.out or os.path.join(outdir, OUT_ROM_V2 if v2 else OUT_ROM)
+    out_bps = os.path.join(outdir, OUT_BPS_V2 if v2 else OUT_BPS)
+    out_ips = os.path.join(outdir, OUT_IPS_V2 if v2 else OUT_IPS)
 
-    print("DQ6 NoPrgress Info > All crash fix")
+    if v2:
+        print("DQ6 NoPrgress crash fix, v2: Info > All and Forget")
+    else:
+        print("DQ6 NoPrgress crash fix, v1: Info > All only")
     print("=" * 78)
 
     jp = load_rom(args.jp, JP_SHA1, JP_CRC32, JP_NAME, EN_SHA1, EN_NAME)
@@ -467,7 +600,7 @@ def main(argv=None):
     print()
 
     old_checksum = read_checksum(en)
-    fixed, checksum, complement = apply_fix(jp, en)
+    fixed, checksum, complement = apply_fix(jp, en, args.version)
 
     # Everything is validated by this point, so it is safe to touch the disk.
     os.makedirs(outdir, exist_ok=True)
@@ -477,6 +610,15 @@ def main(argv=None):
               SPAN_START, SPAN_END, SPAN_END - SPAN_START,
               sum(1 for i in range(SPAN_START, SPAN_END) if en[i] != fixed[i])))
     print("  reinserted 8D C2 3A  =  STA $3AC2  at $C3:3538")
+    if v2:
+        print("  verified {} Forget-fix sites, then relocated word-wrap state:"
+              .format(len(V2_RELOCATIONS) + len(V2_BRANCHES)))
+        print("      $7E:379E -> $7E:{:04X}   width       ( 5 sites)".format(NEW_WIDTH))
+        print("      $7E:37A0 -> $7E:{:04X}   length      ( 8 sites)".format(NEW_LENGTH))
+        print("      $7E:37A2 -> $7E:{:04X}   buffer      ( 6 sites)".format(NEW_BUFFER))
+        for off, before, after, what in V2_BRANCHES:
+            print("      {}   {:02X} -> {:02X}".format(what, before, after))
+        print("      opcodes and instruction lengths unchanged, no new code")
     print("  internal checksum 0x{:04X} -> 0x{:04X} "
           "(complement 0x{:04X})".format(old_checksum, checksum, complement))
     print()
@@ -512,7 +654,12 @@ def main(argv=None):
     print()
     print("  Behavioural testing is still on you: load the result in an "
           "emulator and")
-    print("  try Info > All, backing out before the screen finishes.")
+    if v2:
+        print("  try Info > All, backing out before the screen finishes, and "
+              "run a Forget")
+        print("  conversation. Keep savestates the first time you use Forget.")
+    else:
+        print("  try Info > All, backing out before the screen finishes.")
     return 0
 
 
