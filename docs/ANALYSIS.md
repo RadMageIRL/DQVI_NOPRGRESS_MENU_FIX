@@ -309,24 +309,30 @@ three symptoms disappear together. This is what distinguishes fixing the cause
 from suppressing the symptom: the bounds guard discussed above would have
 stopped the hang and left both artefacts on screen.
 
-### What is still open
+### Confirmed at instruction level
 
-The confirmation above is behavioural. A trace of the fixed ROM covering the
-Info > All sequence has not yet been captured, so the instruction-level
-prediction is not yet directly demonstrated. Specifically, these remain
-unconfirmed by measurement:
+A trace of the fixed ROM covering the Info > All sequence has since been
+captured, on a save with a full **eight-member party**. Every prediction the
+section above left open is now measured directly:
 
-- that `$C3:3538 STA $3AC2` now executes and writes `$0001`
-- that `$C3:964A CMP $3AC2` now reads `$0001` rather than `$00FF`
-- that slot index 1 is now rejected, carry set and branch not taken, matching
-  the Japanese ratio of 18 rejections in 20 dispatches
-- that `$7E:3EEF` is never read and `$C4:560F` is never reached with `Z` set
+| Predicted | Measured in the fixed build |
+|---|---|
+| `$C3:3538 STA $3AC2` executes and writes the party count | executes **8 times**, writing `$0008` each time |
+| `$C3:964A CMP $3AC2` reads the count, not the sentinel | reads **`$0008` at all 8 executions**, never `$00FF` |
+| out-of-range slots rejected, matching the Japanese ratio | **7 rejections** via the early exit at `$C3:964F`, 1 proceed |
+| `$7E:3EEF` never read at the fault site | `$C4:560A` read `$7E:3EEE` with `X:0000` |
+| `$C4:560F` never reached with `Z` set | executes **once**, `Z` clear, passed harmlessly |
 
-Everything observed is consistent with all four, and no alternative mechanism
-would produce exactly this set of three simultaneous changes. But consistency is
-not proof, and this section will be updated when the trace exists.
+The value read is taken from the operand of the comparing instruction itself,
+and the value written from the `A` column, per the two methodology notes above.
+
+Note the ratio scales with the party rather than being a fixed number: the
+Japanese ROM produced 18 rejections in 20 dispatches on a one-member party, and
+the fixed build produces 7 in 8 on an eight-member one. Both are the same
+behaviour, which is the loop stopping at the real end of the party.
 
 ### Scope
 
-Verified on one ROM, one emulator, one party size. **Not** verified across a
-full playthrough, other party sizes, or other emulators.
+Verified on one ROM and one emulator, at **two party sizes**: a solo level 1
+character and a full eight-member party, neither of which hangs. **Not**
+verified across a full playthrough, or on emulators other than MesenCE.

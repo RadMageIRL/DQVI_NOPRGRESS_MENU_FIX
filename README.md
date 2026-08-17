@@ -170,8 +170,29 @@ never initialised. They disappear because the loop bound is correct again, which
 is evidence the **cause** was fixed rather than the crash merely suppressed. A
 guard that only stopped the hang would have left both artefacts on screen.
 
-**Not verified:** a full playthrough, party sizes other than one, and emulators
-other than MesenCE. Reports welcome in the issues.
+### Confirmed at instruction level
+
+The behavioural result above has since been backed by an emulator trace of the
+fixed build, on a save with a **full eight-member party**. The restored
+instruction does exactly what the analysis predicted:
+
+- `$C3:3538 STA $3AC2` executes **8 times, writing `$0008`**, the real party
+  size. This is the instruction that was deleted; before the fix it did not
+  exist.
+- `$C3:964A CMP $3AC2` reads **`$0008` at all 8 executions**, never the `$00FF`
+  sentinel that caused the hang.
+- **7 of those 8 comparisons reject the slot** and take the early exit at
+  `$C3:964F`, with 1 proceeding. That is the same ratio the Japanese ROM
+  produces.
+- `$C4:560A` reads `$7E:3EEE` with `X:0000`, not the uninitialised `$7E:3EEF`.
+- Square's assertion at `$C4:560F` executes **once and never with `Z` set**, so
+  it is passed harmlessly rather than tripped.
+
+Info > All has now been exercised at **two party sizes**, a solo level 1
+character and a full eight-member party, with no hang on either.
+
+**Not verified:** a full playthrough, and emulators other than MesenCE. Reports
+welcome in the issues.
 
 Also verified, before any of the above:
 
@@ -195,12 +216,9 @@ Also verified, before any of the above:
 - Failure paths were exercised: wrong ROM, swapped arguments, missing file,
   already-fixed input. Each stops with a specific message and writes nothing.
 
-One loose end, for completeness: the in-game result above is behavioural. A
-trace-level confirmation, showing directly that `$C3:3538` now executes and that
-the loop bound reads `$0001` instead of `$00FF`, has not been captured yet. The
-behaviour and the three visible changes all match that prediction, but the
-instruction-level proof is still outstanding and this README will say so until
-it is done.
+Nothing about the fix is now resting on inference. The defect, the restored
+bytes, the patch mechanics, the in-game behaviour and the instruction-level
+mechanism have all been measured.
 
 ---
 
