@@ -104,7 +104,7 @@ A"**, and the caller passed the slot index.
 1.93 GiB trace**, and that once is the fatal read. It is never written.
 `$7E:3EEE` is accessed 81 times, and a 16-bit read there returns `$0001`. So
 `$3EEE` holds the 16-bit value 1, and `$3EEF` is merely that value's high byte.
-There is no entry 1. Index 1 reads a byte the game never initialises, which is
+There is no entry 1. Index 1 reads a byte the game never initializes, which is
 zero, and the assertion fires.
 
 Everything in that chain is **byte-identical between the two ROMs**. Bank `$C4`
@@ -205,7 +205,7 @@ accidental deletion:
   as dead epilogue bytes. A deliberate byte reclaim that reclaims nothing makes
   no sense.
 - `STA $3AC2` has no text content. Every other change in this area serves the
-  translation; this one only drops state initialisation.
+  translation; this one only drops state initialization.
 - The deleted instruction sits **immediately after inline parameter bytes**
   (`02 FF` at `$C3:3536`, consumed by the call above it). A tool or a hand edit
   that mismeasured where the inline parameters end would swallow exactly the
@@ -312,13 +312,13 @@ Two further observations make this more than "the crash went away":
 - **The two phantom empty party windows are gone.**
 - **The Def column shows a number instead of `?`.**
 
-Both artefacts were the same defect wearing a different face. The slot loop was
+Both artifacts were the same defect wearing a different face. The slot loop was
 running past the end of a one-member party, so it drew window frames for members
-that do not exist and read stat fields that were never initialised. With the
+that do not exist and read stat fields that were never initialized. With the
 bound restored to the real party count, the loop stops after slot 0 and all
 three symptoms disappear together. This is what distinguishes fixing the cause
 from suppressing the symptom: the bounds guard discussed above would have
-stopped the hang and left both artefacts on screen.
+stopped the hang and left both artifacts on screen.
 
 ### Confirmed at instruction level
 
@@ -340,7 +340,7 @@ and the value written from the `A` column, per the two methodology notes above.
 Note the ratio scales with the party rather than being a fixed number: the
 Japanese ROM produced 18 rejections in 20 dispatches on a one-member party, and
 the fixed build produces 7 in 8 on an eight-member one. Both are the same
-behaviour, which is the loop stopping at the real end of the party.
+behavior, which is the loop stopping at the real end of the party.
 
 ### Scope
 
@@ -534,7 +534,7 @@ Two independent traced sessions, 90 GB and 58.75 GB, the second spanning roughly
 rather than assumed, and including **battle**, which was the standing gap in the
 evidence for the destination region.
 
-In both sessions: no underflow, no uninitialised slot read, no execution outside
+In both sessions: no underflow, no uninitialized slot read, no execution outside
 legitimate banks, no fabricated message ID.
 
 The strongest single result is the **lane analysis**. Across the whole second
@@ -600,7 +600,7 @@ Two of these produced confident, wrong, published-to-the-notes conclusions.
   one address per memory access and leaves the width to the processor status
   flags, so every 16-bit access left its high byte looking untouched. That
   produced a neat alternating pattern which was duly reported as "a 16-bit
-  strided structure with only the odd halves untouched". It was an artefact of
+  strided structure with only the odd halves untouched". It was an artifact of
   the extraction. Widening every access to two bytes removes it. This single bug
   produced a false negative that concluded **no safe memory existed anywhere**,
   when in fact bank `$7F` alone had a 21,905-byte free run.

@@ -652,7 +652,7 @@ def main(argv=None):
               "ROM reproduce the output byte for byte")
 
     print()
-    print("  Behavioural testing is still on you: load the result in an "
+    print("  Behavioral testing is still on you: load the result in an "
           "emulator and")
     if v2:
         print("  try Info > All, backing out before the screen finishes, and "

@@ -50,7 +50,7 @@ Despite the name `menufix`, kept for continuity with v1, v2 covers both crashes.
 the unmodified NoPrgress ROM.
 
 v2 already contains the v1 fix, so there is nothing to gain by stacking them,
-and the tools will not co-operate anyway. Applying the v2 **BPS** to a v1 output
+and the tools will not cooperate anyway. Applying the v2 **BPS** to a v1 output
 is refused outright, because BPS records the CRC32 of the ROM it expects:
 
 ```
@@ -155,7 +155,7 @@ writes the real party size over the top of it.
 The Japanese ROM does both, in that order, every time. The translation is
 missing the second write, so the bound stays at `0xFF`. The loop then accepts
 slot index 1 on a one-member party, reads a table entry that was never
-initialised, and hits an assertion the original developers left in the shipped
+initialized, and hits an assertion the original developers left in the shipped
 game: an infinite branch-to-itself at `$C4:560F`. The game does not crash, it
 spins there forever.
 
@@ -316,7 +316,7 @@ that has not been exercised in practice.
 
 ### Anything else inherited
 
-Any other translation bug, typo, formatting oddity, or behaviour not specifically
+Any other translation bug, typo, formatting oddity, or behavior not specifically
 named as fixed here remains exactly as NoPrgress shipped it. These patches
 address two crashes and nothing else.
 
@@ -342,7 +342,7 @@ reproduce the hang on demand.
 That last point is the part worth dwelling on. Those two artifacts were the
 visible face of the same defect: the slot loop was running past the end of the
 party, drawing windows for members that do not exist and reading stats that were
-never initialised. They disappear because the loop bound is correct again, which
+never initialized. They disappear because the loop bound is correct again, which
 is evidence the **cause** was fixed rather than the crash merely suppressed. A
 guard that only stopped the hang would have left both artifacts on screen.
 
@@ -374,7 +374,7 @@ shops, buying, menus, Info > All, Equip and Forget.
 In both sessions:
 
 - No underflow at the arithmetic that used to receive a corrupted value.
-- No read of an uninitialised buffer slot.
+- No read of an uninitialized buffer slot.
 - No execution outside legitimate banks, and none in open bus.
 - No fabricated message ID.
 - **The relocated storage is touched only by the code that allocates it.** In the
