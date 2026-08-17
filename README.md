@@ -49,10 +49,23 @@ Despite the name `menufix`, kept for continuity with v1, v2 covers both crashes.
 **If you already applied v1, you cannot apply v2 on top of it.** Start again from
 the unmodified NoPrgress ROM.
 
-v2 already contains the v1 fix. Applying one to the output of the other will not
-work: the BPS will refuse outright, because it records the CRC32 of the ROM it
-expects, and an IPS will silently produce a broken ROM. Both patches target the
-same starting point:
+v2 already contains the v1 fix, so there is nothing to gain by stacking them,
+and the tools will not co-operate anyway. Applying the v2 **BPS** to a v1 output
+is refused outright, because BPS records the CRC32 of the ROM it expects:
+
+```
+$ flips --apply dqvi-noprgress-menufix-v2.bps v1-output.sfc out.sfc
+This patch is not intended for this ROM.
+```
+
+**IPS cannot check its input**, so it will apply to anything and tell you it
+succeeded. In this particular case that happens to be harmless, because the v2
+IPS rewrites every byte v1 changed and the result is the correct v2 ROM, but
+that is a property of these two patches and not something to rely on in general.
+Do not stack patches and then assume it worked. Start from the stock ROM and
+check the SHA-1 of what you get against the table below.
+
+Both patches target the same starting point:
 
 ```
 Dragon Quest VI with NoPrgress v0.90b2 applied, headerless, 4,194,304 bytes
@@ -189,9 +202,15 @@ flips --apply dqvi-noprgress-menufix-v2.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 ```
 
 **Both patches target the translated ROM (`B545C548`), not the Japanese base,
-and not each other's output.** BPS records its expected source, so Flips will
-refuse a wrong ROM rather than producing a broken one. An IPS is included for
-tools that cannot read BPS, but IPS cannot validate its input, so prefer the BPS.
+and not each other's output.** BPS records its expected source, so Flips refuses
+a wrong ROM rather than producing a broken one. An IPS is included for tools
+that cannot read BPS, but IPS cannot validate its input at all, so prefer the
+BPS.
+
+Both patches were cross-checked against Flips as the reference implementation
+rather than only against this repository's own code: Flips applies both the BPS
+and the IPS to the expected result, and a patch Flips generates independently
+produces the same ROM.
 
 ### Route B, the script, from both ROMs
 
