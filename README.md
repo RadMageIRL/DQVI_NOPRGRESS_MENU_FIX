@@ -113,9 +113,7 @@ IPS cannot validate its input, so prefer the BPS.
 ### Route B, the script, from both ROMs
 
 ```
-python DQVI_NoPrgress_Menu_Crash_Fix.py \
-    --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" \
-    --en "DQ6 NoPrgress.sfc"
+python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc"
 ```
 
 Python 3.8 or newer, standard library only, no pip and no external tools. It
