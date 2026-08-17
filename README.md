@@ -339,12 +339,12 @@ reproduce the hang on demand.
 - **The two phantom empty party windows are gone**, and **the Def column now
   shows a number instead of `?`**.
 
-That last point is the part worth dwelling on. Those two artefacts were the
+That last point is the part worth dwelling on. Those two artifacts were the
 visible face of the same defect: the slot loop was running past the end of the
 party, drawing windows for members that do not exist and reading stats that were
 never initialised. They disappear because the loop bound is correct again, which
 is evidence the **cause** was fixed rather than the crash merely suppressed. A
-guard that only stopped the hang would have left both artefacts on screen.
+guard that only stopped the hang would have left both artifacts on screen.
 
 Confirmed at instruction level on a save with a **full eight-member party**:
 
