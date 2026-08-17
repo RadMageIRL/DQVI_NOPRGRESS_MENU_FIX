@@ -1,0 +1,47 @@
+# ============================================================
+# NO ROMs. Ever. Patches only.
+# ============================================================
+*.sfc
+*.smc
+*.fig
+*.swc
+*.sfc.bak
+
+# save files and savestates
+*.srm
+*.srm.bak
+*.sav
+*.st[0-9]
+*.bst
+
+# The NoPrgress translation patch is their work, not ours to redistribute.
+# Any .ips brought in by a user stays out; the one shipped patch is added
+# explicitly with `git add -f`.
+*.ips
+
+# Emulator trace logs are gigabytes.
+*.txt
+!requirements.txt
+
+# archives that might contain a ROM
+*.zip
+*.7z
+*.rar
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# scratch
+tmp/
+scratch/
+_verify/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
