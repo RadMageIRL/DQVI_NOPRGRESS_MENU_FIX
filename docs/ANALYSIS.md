@@ -247,8 +247,8 @@ count, would stop the hang. It was kept as a fallback and not used, because it
 treats the symptom: the bound would still be wrong, so the screen would still
 iterate slots that do not exist and still draw the empty member windows that are
 visible on the status screen today. Restoring the instruction puts the routine
-back to what Square wrote, and the correct bound then rejects the bad index by
-itself.
+back to what the original developers wrote, and the correct bound then rejects
+the bad index by itself.
 
 ---
 

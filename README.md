@@ -26,8 +26,8 @@ behind it, and a script that builds the fix from your own ROMs.
   else in that routine is intact, right down to the string identifiers. This is
   a slip in difficult work, not a failing, and the translation is the reason
   this repository can exist at all.
-- **Square** (now Square Enix) for the original 1995 game. The fix does not add
-  anything; it puts their bytes back.
+- **Enix**, publisher of the original 1995 game, whose rights now sit with
+  Square Enix. The fix does not add anything; it puts their bytes back.
 
 ---
 
@@ -183,8 +183,8 @@ instruction does exactly what the analysis predicted:
   `$C3:964F`, with 1 proceeding. That is the same ratio the Japanese ROM
   produces.
 - `$C4:560A` reads `$7E:3EEE` with `X:0000`, not the uninitialised `$7E:3EEF`.
-- Square's assertion at `$C4:560F` executes **once and never with `Z` set**, so
-  it is passed harmlessly rather than tripped.
+- The original developers' assertion at `$C4:560F` executes **once and never
+  with `Z` set**, so it is passed harmlessly rather than tripped.
 
 Info > All has now been exercised at **two party sizes**, a solo level 1
 character and a full eight-member party, with no hang on either.
@@ -199,7 +199,7 @@ Also verified, before any of the above:
   reading code. The faulting instruction, the register state at the fault, and
   the missing write are all measured.
 - The 87-byte restoration span is byte-for-byte the Japanese original, so the
-  routine ends up matching Square's code exactly.
+  routine ends up matching the original code exactly.
 - Nothing references the middle of the shifted span: no branches in, no
   same-bank `JSR` or `JMP`, no window-descriptor handlers. Checked explicitly,
   see the analysis.
@@ -237,5 +237,6 @@ LICENSE
 
 See [LICENSE](LICENSE). The script and the documentation are the original work
 here. The patch itself is a difference against NoPrgress's translation and
-restores Square Enix's original bytes; it is published in the same spirit as the
-translation it corrects, and it is useless without a ROM you already have.
+restores original bytes that Square Enix now holds the rights to; it is
+published in the same spirit as the translation it corrects, and it is useless
+without a ROM you already have.
