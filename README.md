@@ -124,6 +124,8 @@ refuses to write anything if either check fails, and never modifies its inputs.
 `--help` explains what you need to supply. Route B also regenerates both patch
 files, so you can confirm they match the ones shipped here.
 
+![The fix script running, showing input verification, the restored instruction, the recomputed checksum, and the hashes of all three outputs](screenshots/script-run.png)
+
 ### What you should end up with
 
 | | Size | CRC32 | SHA-1 |
@@ -147,10 +149,31 @@ do here rather than leaving a stale value behind.
 
 ## Testing status
 
-**Honest summary: verified thoroughly by static analysis and patch mechanics,
-not yet confirmed in game.**
+**Confirmed working in game, 2026-08-17.**
 
-Verified:
+Tested on `DQVI_NoPrgress_MenuFix.sfc`, CRC32 `174D40F8`, SHA-1
+`01e417a0036db27fc5a4102e012ceec82c56ca76`, in **MesenCE**, with a **solo party
+at level 1** with no equipment. That is the exact state that used to reproduce
+the hang on demand.
+
+- The previously fatal sequence, **enter Info > All and back out before the
+  screen finishes drawing**, was repeated and **no longer hangs**.
+- The normal path, entering and letting the screen finish before backing out,
+  also works.
+- **The two phantom empty party windows are gone**, and **the Def column now
+  shows a number instead of `?`**.
+
+That last point is the part worth dwelling on. Those two artefacts were the
+visible face of the same defect: the slot loop was running past the end of the
+party, drawing windows for members that do not exist and reading stats that were
+never initialised. They disappear because the loop bound is correct again, which
+is evidence the **cause** was fixed rather than the crash merely suppressed. A
+guard that only stopped the hang would have left both artefacts on screen.
+
+**Not verified:** a full playthrough, party sizes other than one, and emulators
+other than MesenCE. Reports welcome in the issues.
+
+Also verified, before any of the above:
 
 - The defect was identified by diffing emulator trace logs of the Japanese and
   translated ROMs running the same interrupted sequence, not inferred from
@@ -172,11 +195,12 @@ Verified:
 - Failure paths were exercised: wrong ROM, swapped arguments, missing file,
   already-fixed input. Each stops with a specific message and writes nothing.
 
-**Not yet verified: the in-game behaviour.** Nobody has yet confirmed that
-Info > All survives the interrupted back-out on a real playthrough. The
-reasoning says it should, because the bound is now correct and slot 1 gets
-rejected the way it does in the Japanese ROM, but that is an argument and not a
-playtest. If you try it, a report either way is welcome in the issues.
+One loose end, for completeness: the in-game result above is behavioural. A
+trace-level confirmation, showing directly that `$C3:3538` now executes and that
+the loop bound reads `$0001` instead of `$00FF`, has not been captured yet. The
+behaviour and the three visible changes all match that prediction, but the
+instruction-level proof is still outstanding and this README will say so until
+it is done.
 
 ---
 

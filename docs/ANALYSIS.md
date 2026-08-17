@@ -285,9 +285,48 @@ is authoritative and needs no reconstruction.
 
 ---
 
-## Status
+## Status: confirmed in game, 2026-08-17
 
-The defect, the fault, and the byte-level content of the fix are measured. The
-patch mechanics are verified, including against Flips as an independent
-implementation. **In-game behaviour is not yet confirmed**; see the testing
-section of the README.
+The defect, the fault, and the byte-level content of the fix are measured, and
+the patch mechanics are verified against Flips as an independent implementation.
+
+**The fix is confirmed working.** On `DQVI_NoPrgress_MenuFix.sfc`, CRC32
+`174D40F8`, SHA-1 `01e417a0036db27fc5a4102e012ceec82c56ca76`, in MesenCE, with a
+solo party at level 1, the previously fatal sequence no longer hangs. Entering
+Info > All and backing out before the screen finishes now behaves normally, as
+does the uninterrupted path.
+
+Two further observations make this more than "the crash went away":
+
+- **The two phantom empty party windows are gone.**
+- **The Def column shows a number instead of `?`.**
+
+Both artefacts were the same defect wearing a different face. The slot loop was
+running past the end of a one-member party, so it drew window frames for members
+that do not exist and read stat fields that were never initialised. With the
+bound restored to the real party count, the loop stops after slot 0 and all
+three symptoms disappear together. This is what distinguishes fixing the cause
+from suppressing the symptom: the bounds guard discussed above would have
+stopped the hang and left both artefacts on screen.
+
+### What is still open
+
+The confirmation above is behavioural. A trace of the fixed ROM covering the
+Info > All sequence has not yet been captured, so the instruction-level
+prediction is not yet directly demonstrated. Specifically, these remain
+unconfirmed by measurement:
+
+- that `$C3:3538 STA $3AC2` now executes and writes `$0001`
+- that `$C3:964A CMP $3AC2` now reads `$0001` rather than `$00FF`
+- that slot index 1 is now rejected, carry set and branch not taken, matching
+  the Japanese ratio of 18 rejections in 20 dispatches
+- that `$7E:3EEF` is never read and `$C4:560F` is never reached with `Z` set
+
+Everything observed is consistent with all four, and no alternative mechanism
+would produce exactly this set of three simultaneous changes. But consistency is
+not proof, and this section will be updated when the trace exists.
+
+### Scope
+
+Verified on one ROM, one emulator, one party size. **Not** verified across a
+full playthrough, other party sizes, or other emulators.
