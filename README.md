@@ -44,14 +44,14 @@ Despite the name `menufix`, kept for continuity with v1, v2 covers both crashes.
 
 ---
 
-## The two patches are not stackable
+## Start from the stock ROM, not from a v1 output
 
-**If you already applied v1, you cannot apply v2 on top of it.** Start again from
-the unmodified NoPrgress ROM.
+**Do not stack these patches.** v2 already contains the v1 fix, so there is
+nothing to gain by stacking them. Start again from the unmodified NoPrgress ROM.
 
-v2 already contains the v1 fix, so there is nothing to gain by stacking them,
-and the tools will not cooperate anyway. Applying the v2 **BPS** to a v1 output
-is refused outright, because BPS records the CRC32 of the ROM it expects:
+What actually happens if you try it anyway, measured rather than assumed.
+Applying the v2 **BPS** to a v1 output is refused outright, because BPS records
+the CRC32 of the ROM it expects:
 
 ```
 $ flips --apply dqvi-noprgress-menufix-v2.bps v1-output.sfc out.sfc
