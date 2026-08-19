@@ -1,16 +1,21 @@
-# How both hangs were found, and why the fixes are safe
+# How all three were found, and why the fixes are safe
 
-Technical write-up of two crashes in the NoPrgress DQ6 translation.
+Technical write-up of two crashes and one lost display in the NoPrgress DQ6
+translation.
 
 - **Part one, below:** the **Info > All** hang, and the three-byte restoration
-  that fixes it. Shipped in v1 and v2.
+  that fixes it. Shipped in v1, v2 and v3.
 - **[Part two](#part-two-the-forget-crash):** the **Forget** crash, and the
-  variable relocation that fixes it. Shipped in v2 only.
+  variable relocation that fixes it. Shipped in v2 and v3.
+- **[Part three](#part-three-the-gold-window):** the **gold window**, deleted
+  from the info screen when the status window was widened for English labels.
+  Shipped in v3 only. Not a crash.
 
-The two are unrelated defects with different shapes. The first is a deleted
+All three are unrelated defects with different shapes. The first is a deleted
 instruction. The second is a memory allocation collision, in which every
 instruction on the fault path is byte-identical to the Japanese original and the
-defect is in *where* the translation put its data.
+defect is in *where* the translation put its data. The third is a deletion made
+deliberately, to free space that a wider window had taken.
 
 Measured facts and inferences are labelled separately throughout. Where
 something is a guess, it says so. The refuted hypotheses are kept: they were

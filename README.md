@@ -81,11 +81,12 @@ This patch is not intended for this ROM.
 **IPS cannot check its input**, so it will apply to anything and tell you it
 succeeded. In this particular case that happens to be harmless, because the v2
 IPS rewrites every byte v1 changed and the result is the correct v2 ROM, but
-that is a property of these two patches and not something to rely on in general.
+that is a property of these particular patches and not something to rely on in
+general.
 Do not stack patches and then assume it worked. Start from the stock ROM and
 check the SHA-1 of what you get against the table below.
 
-Both patches target the same starting point:
+All three patches target the same starting point:
 
 ```
 Dragon Quest VI with NoPrgress v0.90b2 applied, headerless, 4,194,304 bytes
@@ -283,16 +284,16 @@ flips --apply dqvi-noprgress-menufix-v2.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 flips --apply dqvi-noprgress-menufix-v3.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 ```
 
-**Both patches target the translated ROM (`B545C548`), not the Japanese base,
-and not each other's output.** BPS records its expected source, so Flips refuses
+**All three patches target the translated ROM (`B545C548`), not the Japanese
+base, and not each other's output.** BPS records its expected source, so Flips refuses
 a wrong ROM rather than producing a broken one. An IPS is included for tools
 that cannot read BPS, but IPS cannot validate its input at all, so prefer the
 BPS.
 
-Both patches were cross-checked against Flips as the reference implementation
-rather than only against this repository's own code: Flips applies both the BPS
-and the IPS to the expected result, and a patch Flips generates independently
-produces the same ROM.
+Every patch here was cross-checked against Flips as the reference
+implementation rather than only against this repository's own code: Flips
+applies both the BPS and the IPS to the expected result, and a patch Flips
+generates independently produces the same ROM.
 
 ### Route B, the script, from both ROMs
 
@@ -320,7 +321,7 @@ v1 produces the same shape of output, in
 ## Identifying what you have
 
 CRC32 is **useless for identifying a `.bps` file**: every valid BPS patch
-self-checks to `2144DF1C` by construction, so both patches below show the same
+self-checks to `2144DF1C` by construction, so every BPS below shows the same
 value. Use SHA-1.
 
 | File | Size | SHA-1 |
@@ -518,12 +519,14 @@ If the text is in Japanese, or something looks odd but nothing crashed, read
 
 ```
 README.md                          this file
-DQVI_NoPrgress_Menu_Crash_Fix.py   builds either version from both ROMs, stdlib only
+DQVI_NoPrgress_Menu_Crash_Fix.py   builds any of the three versions from both ROMs, stdlib only
 dqvi-noprgress-menufix-v1.bps      v1 patch, targets the translated ROM B545C548
 dqvi-noprgress-menufix-v1.ips      v1 patch as IPS, for older tools
 dqvi-noprgress-menufix-v2.bps      v2 patch, targets the translated ROM B545C548
 dqvi-noprgress-menufix-v2.ips      v2 patch as IPS, for older tools
-docs/ANALYSIS.md                   how both bugs were found, and why the fixes are safe
+dqvi-noprgress-menufix-v3.bps      v3 patch, targets the translated ROM B545C548
+dqvi-noprgress-menufix-v3.ips      v3 patch as IPS, for older tools
+docs/ANALYSIS.md                   how all three were found, and why the fixes are safe
 LICENSE
 ```
 
