@@ -11,6 +11,8 @@ that builds them from your own ROMs.
 
 ---
 
+<img width="1904" height="1159" alt="DQ6_InfoAll_Forget_Gold" src="https://github.com/user-attachments/assets/cab2a7e8-d726-4ec5-897e-cc9581c63654" />
+
 ## Which patch do you want?
 
 Three patches are available. They are a **choice, not a sequence**. v1 and v2
