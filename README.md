@@ -271,7 +271,9 @@ narrower than searching for constants.
 
 ## How to apply
 
-Two routes. Route A needs one ROM, route B needs both.
+Two routes, and either works for **any of the three versions**. Route A applies
+a ready-made patch and needs one ROM. Route B rebuilds from source and needs
+both ROMs.
 
 ### Route A, the patch, with Flips
 
@@ -297,24 +299,29 @@ generates independently produces the same ROM.
 
 ### Route B, the script, from both ROMs
 
+One command per version. `--version` picks what you get; **1 is the default**,
+so the command that built v1 still builds v1.
+
 ```
 python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc"
 python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc" --version 2
+python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc" --version 3
 ```
 
-Python 3.8 or newer, standard library only, no pip and no external tools.
-`--version 3` adds the gold window on top of v2. `--version 1` is still the
-default, so the command that built v1 still builds v1. It
+Python 3.8 or newer, standard library only, no pip and no external tools. It
 verifies both inputs by SHA-1, checks that every byte it is about to change
 holds exactly what it expects, refuses to write anything if any check fails, and
 never modifies its inputs. `--help` explains what you need to supply. Route B
 also regenerates the patch files, so you can confirm they match the ones shipped
 here.
 
-![The fix script running with --version 2, showing input verification, the restored instruction, the twenty-one verified relocation sites, the recomputed checksum, and the hashes of all three outputs](screenshots/script-run-v2.png)
+**`--version 3`**, which adds the gold window on top of v2:
 
-v1 produces the same shape of output, in
-[screenshots/script-run.png](screenshots/script-run.png).
+![The fix script running with --version 3 in a clean folder, showing both ROMs verified by SHA-1, the restored STA $3AC2, the twenty-one Forget relocation sites, the gold window restoration at 0x033593 and 0x057E88, the recomputed checksum, and the hashes of all three outputs](screenshots/script-run-v3.png)
+
+v1 and v2 produce the same shape of output, in
+[screenshots/script-run.png](screenshots/script-run.png) and
+[screenshots/script-run-v2.png](screenshots/script-run-v2.png).
 
 ---
 
