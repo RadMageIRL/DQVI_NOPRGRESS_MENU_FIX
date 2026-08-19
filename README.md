@@ -13,8 +13,17 @@ that builds them from your own ROMs.
 
 ## Which patch do you want?
 
-Two patches are available. They are a **choice, not a sequence**. v1 remains
-available and is the recommended option if you want only the verified minimum.
+Three patches are available. They are a **choice, not a sequence**. v1 and v2
+remain available and unchanged; pick the one that matches what you want changed.
+
+| | Info > All | Forget | gold window | changes menu layout |
+|---|---|---|---|---|
+| **v1** | yes | - | - | no |
+| **v2** | yes | yes | - | no |
+| **v3** | yes | yes | yes | **yes** |
+
+**If you want only the crash fixes, take v2.** v3 is the only one that alters
+how a menu looks.
 
 ### v1 - Info > All only, the conservative option
 
@@ -42,12 +51,23 @@ fix" below for why.
 
 Despite the name `menufix`, kept for continuity with v1, v2 covers both crashes.
 
+### v3 - adds the gold window
+
+Everything in v2, plus the gold display restored to the info screen.
+
+**This is the only patch here that changes how anything looks.** v1 and v2 are
+invisible until they stop a crash; v3 moves a window. If that is not what you
+want, take v2. Nothing is lost by doing so.
+
+No text is changed by any of the three.
+
 ---
 
 ## Start from the stock ROM, not from a v1 output
 
-**Do not stack these patches.** v2 already contains the v1 fix, so there is
-nothing to gain by stacking them. Start again from the unmodified NoPrgress ROM.
+**Do not stack these patches.** Each one already contains the ones before it -
+v2 contains v1, and v3 contains v2 - so there is nothing to gain by stacking
+them. Start again from the unmodified NoPrgress ROM.
 
 What actually happens if you try it anyway, measured rather than assumed.
 Applying the v2 **BPS** to a v1 output is refused outright, because BPS records
@@ -187,6 +207,67 @@ the measurement errors made along the way, is in
 
 ---
 
+---
+
+## The gold window, and why v3 exists
+
+Open the info screen in the Japanese game and your gold is in the top right.
+Open it in the translation and it is not there at all.
+
+### What happened
+
+English stat labels are wider than Japanese ones, so the status window was
+widened to fit them. That left the gold window with nowhere to sit:
+
+```
+Japanese   status cols 10-21   gold cols 22-30    side by side
+English    status cols 10-24   gold cols 16-23    gold underneath the status window
+```
+
+Having no room for it, the translation deleted the seven bytes that draw the
+gold figure and padded the gap with a duplicated `RTL` epilogue so the
+surrounding addresses still lined up. **That is the same technique as the
+`STA $3AC2` deletion four bytes earlier** - the one that causes the Info > All
+crash this repository already fixes. The two were almost certainly done in the
+same sitting, for the same reason: making room.
+
+### What v3 does about it
+
+It moves the gold window to the top left, where the English layout has space,
+and puts the draw call back. Twenty-five bytes:
+
+```
+0x033593   22 bytes   the draw call restored, at exact size over dead bytes
+0x057E88    3 bytes   the window's position and width
+```
+
+The call is written over the English fifteen bytes plus that dead duplicate
+epilogue, consuming it exactly, so nothing moves and no new space is needed.
+The window draws string `$10`, a bare one-byte `G` - **the same substitution the
+translation already uses at its other gold window**, applied to the one place it
+was not applied.
+
+### It restores original behaviour rather than adding anything
+
+The gold window is the game's, not this patch's. It was in *Dragon Quest VI* in
+1995, the translation lost it while making room for wider English labels, and v3
+puts it back. Nothing is invented and no text is written.
+
+Only the gold window's own descriptor changes. The status window, the command
+menu and every other window in the game are byte-identical to the ones NoPrgress
+shipped.
+
+### How it was found
+
+Two emulator traces of the same screen, one per ROM. Every address executed
+during the Japanese trace was collected - 14,839 of them - mapped to file
+offsets, and compared against the English ROM. That reduced the problem to seven
+regions of divergence in code that demonstrably runs, one of which was the
+deleted call.
+
+This is the same technique that found the deleted `STA $3AC2`, and it is much
+narrower than searching for constants.
+
 ## How to apply
 
 Two routes. Route A needs one ROM, route B needs both.
@@ -199,6 +280,7 @@ Use [Flips](https://github.com/Alcaro/Flips). Apply the patch you want to your
 ```
 flips --apply dqvi-noprgress-menufix-v1.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 flips --apply dqvi-noprgress-menufix-v2.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
+flips --apply dqvi-noprgress-menufix-v3.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 ```
 
 **Both patches target the translated ROM (`B545C548`), not the Japanese base,
@@ -220,7 +302,8 @@ python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Dai
 ```
 
 Python 3.8 or newer, standard library only, no pip and no external tools.
-`--version 1` is the default, so the command that built v1 still builds v1. It
+`--version 3` adds the gold window on top of v2. `--version 1` is still the
+default, so the command that built v1 still builds v1. It
 verifies both inputs by SHA-1, checks that every byte it is about to change
 holds exactly what it expects, refuses to write anything if any check fails, and
 never modifies its inputs. `--help` explains what you need to supply. Route B
@@ -246,6 +329,8 @@ value. Use SHA-1.
 | `dqvi-noprgress-menufix-v1.ips` | 106 | `7f34a16e83a2d40934652311dedcecc6ac0b4f12` |
 | `dqvi-noprgress-menufix-v2.bps` | 208 | `54f97e60e9038ecaae7d22b623aa757a63293a99` |
 | `dqvi-noprgress-menufix-v2.ips` | 241 | `1c6921aa886d1799a33d000c33f51fda3c7a12bd` |
+| `dqvi-noprgress-menufix-v3.bps` | 233 | `45f1f42f68df186b5c835a198c5a5062b68f5099` |
+| `dqvi-noprgress-menufix-v3.ips` | 279 | `c66eb3a7e40328023f6c697af08179ad485a993a` |
 
 And the ROMs they produce:
 
@@ -253,6 +338,7 @@ And the ROMs they produce:
 |---|---:|---|---|
 | v1, `DQVI_NoPrgress_MenuFix.sfc` | 4,194,304 | `174D40F8` | `01e417a0036db27fc5a4102e012ceec82c56ca76` |
 | v2, `DQVI_NoPrgress_MenuFix_v2.sfc` | 4,194,304 | `57823516` | `ba222c4b3fcc1c3dbe069272e25bdf33c3fe07a6` |
+| v3, `DQVI_NoPrgress_MenuFix_v3.sfc` | 4,194,304 | `DACF8FD7` | `a4175c168ff83e5031f13040d27c2fd259c64047` |
 
 **v1 changes 88 bytes** against the translated ROM:
 
@@ -270,7 +356,19 @@ And the ROMs they produce:
 0x00FE27, 0x00FF1D     2 bytes    two branch conditions
 ```
 
-Internal checksum goes from `0xD17A` to `0xD208` for v1 and `0xD622` for v2.
+**v3 changes 141 bytes**:
+
+```
+0x00FFDC - 0x00FFE0    4 bytes    recomputed internal checksum and complement
+0x033538 - 0x03358C   84 bytes    the Info > All restoration, identical to v1
+19 sites in bank $C0  38 bytes    relocated operands, identical to v2
+0x00FE27, 0x00FF1D     2 bytes    two branch conditions, identical to v2
+0x033593 - 0x0335A9   22 bytes    the restored gold draw call
+0x057E88 - 0x057E8B    3 bytes    the gold window's position and width
+```
+
+Internal checksum goes from `0xD17A` to `0xD208` for v1, `0xD622` for v2, and
+`0xD501` for v3.
 NoPrgress shipped a correct checksum, so recomputing it after changing the ROM
 is the right thing to do rather than leaving a stale value behind.
 

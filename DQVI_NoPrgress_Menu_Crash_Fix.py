@@ -136,6 +136,73 @@ OUT_ROM_V2 = "DQVI_NoPrgress_MenuFix_v2.sfc"
 OUT_BPS_V2 = "dqvi-noprgress-menufix-v2.bps"
 OUT_IPS_V2 = "dqvi-noprgress-menufix-v2.ips"
 
+OUT_ROM_V3 = "DQVI_NoPrgress_MenuFix_v3.sfc"
+OUT_BPS_V3 = "dqvi-noprgress-menufix-v3.bps"
+OUT_IPS_V3 = "dqvi-noprgress-menufix-v3.ips"
+
+# ---------------------------------------------------------------------------
+# v3: the gold window on the info screen
+#
+# The Japanese game shows your gold at the top right of the info screen. The
+# translation shows nothing there at all.
+#
+# English stat labels are wider than Japanese ones, so the status window was
+# widened to fit them, and that left the gold window with nowhere to sit:
+#
+#     Japanese   status cols 10-21   gold cols 22-30    side by side
+#     English    status cols 10-24   gold cols 16-23    gold underneath it
+#
+# Having no room for it, the translation deleted the call that draws the gold
+# figure from $C3:3593 - seven bytes, LDA #$007A / JSL $C3763A - and padded the
+# gap with a duplicated RTL epilogue so downstream addresses stayed put. That
+# is the same padding technique as the STA $3AC2 deletion four bytes earlier,
+# which is the Info > All crash this patch already fixes.
+#
+# This restores original behaviour rather than adding anything:
+#
+#   - the call goes back at exact size over the English 15 bytes plus the dead
+#     duplicate epilogue. No relocation. The write ends at $35A8, one byte
+#     short of $35A9, which is the routine that opens the window.
+#   - it draws string $10, a bare one-byte "G". Entry $7A is not a gold string:
+#     $74-$7F are " A" through " L", an alphabet series in which every entry
+#     carries an $88 prefix, and that prefix renders as a stray mark. $10 is
+#     what the translation points its OTHER gold window at, so this is their
+#     own substitution applied to the site they missed.
+#   - the window moves to cols 1-9, rows 1-3, where the English layout has
+#     room. Only its own descriptor changes; no other window moves.
+#
+# Window geometry lives in a descriptor table at $C5:7B5C, 14 bytes per entry,
+# indexed by $3058. Gold is entry 58; bytes 11-13 of each entry are the draw
+# routine pointer, which is how it was identified.
+#
+# None of this overlaps the Forget fix or the Info > All span:
+#     Info > All   0x033538-0x03358F      gold code   0x033593-0x0335A9
+#     Forget       0x00FDD6-0x00FF36      gold desc   0x057E88-0x057E8B
+
+GOLD_CODE_START = 0x033593
+GOLD_CODE_END = 0x0335A9            # exclusive
+GOLD_CODE_BEFORE = bytes.fromhex("A93E0022FE83C3ABC2307AFA68286BC2307AFA68286B")
+GOLD_CODE_AFTER = bytes.fromhex("A91000223A76C3A93E0022FE83C3ABC2307AFA68286B")
+GOLD_DESC_START = 0x057E88          # descriptor 58, bytes 0-2 are X, Y, W
+GOLD_DESC_END = 0x057E8B            # exclusive
+GOLD_DESC_AFTER = bytes([0x01, 0x01, 0x09])
+
+
+def apply_gold(out):
+    """Restore the gold window in place. Refuses if the ROM is not as expected."""
+    found = bytes(out[GOLD_CODE_START:GOLD_CODE_END])
+    if found != GOLD_CODE_BEFORE:
+        raise Fail(
+            "the gold routine at 0x{:06X}-0x{:06X} does not contain the "
+            "expected pre-fix bytes.\n"
+            "  expected {}\n"
+            "  found    {}\n"
+            "  Refusing to write.".format(
+                GOLD_CODE_START, GOLD_CODE_END,
+                GOLD_CODE_BEFORE.hex(), found.hex()))
+    out[GOLD_CODE_START:GOLD_CODE_START + len(GOLD_CODE_AFTER)] = GOLD_CODE_AFTER
+    out[GOLD_DESC_START:GOLD_DESC_END] = GOLD_DESC_AFTER
+
 
 class Fail(Exception):
     """A fatal, reportable problem. Nothing is written when this is raised."""
@@ -281,9 +348,9 @@ def apply_v2(out):
 
 def apply_fix(jp, en, version=1):
     """Return the fixed image. Neither input is touched."""
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise Fail("unknown version {!r}".format(version))
-    if version == 2:
+    if version >= 2:
         check_v2_sites(en)
 
     if en[SPAN_START:SPAN_END] != SPAN_BEFORE:
@@ -309,8 +376,10 @@ def apply_fix(jp, en, version=1):
     out = bytearray(en)
     out[SPAN_START:SPAN_END] = jp[SPAN_START:SPAN_END]
 
-    if version == 2:
+    if version >= 2:
         apply_v2(out)
+    if version >= 3:
+        apply_gold(out)
 
     checksum, complement = snes_checksum(out)
     write_checksum(out, checksum, complement)
@@ -572,22 +641,30 @@ def main(argv=None):
                         help="directory for outputs (default: alongside --en)")
     parser.add_argument("--no-patches", action="store_true",
                         help="write only the fixed ROM, no BPS or IPS")
-    parser.add_argument("--version", type=int, choices=(1, 2), default=1,
+    parser.add_argument("--version", type=int, choices=(1, 2, 3), default=1,
                         metavar="N",
                         help="1 = Info > All only (default, the conservative "
-                             "option); 2 = also fix the Forget crash")
+                             "option); 2 = also fix the Forget crash; "
+                             "3 = also restore the gold window, which changes "
+                             "menu layout")
     args = parser.parse_args(argv)
 
     outdir = args.outdir
     if outdir is None:
         outdir = os.path.dirname(os.path.abspath(args.en))
 
-    v2 = args.version == 2
-    out_rom = args.out or os.path.join(outdir, OUT_ROM_V2 if v2 else OUT_ROM)
-    out_bps = os.path.join(outdir, OUT_BPS_V2 if v2 else OUT_BPS)
-    out_ips = os.path.join(outdir, OUT_IPS_V2 if v2 else OUT_IPS)
+    v2 = args.version >= 2
+    v3 = args.version >= 3
+    names = {1: (OUT_ROM, OUT_BPS, OUT_IPS),
+             2: (OUT_ROM_V2, OUT_BPS_V2, OUT_IPS_V2),
+             3: (OUT_ROM_V3, OUT_BPS_V3, OUT_IPS_V3)}[args.version]
+    out_rom = args.out or os.path.join(outdir, names[0])
+    out_bps = os.path.join(outdir, names[1])
+    out_ips = os.path.join(outdir, names[2])
 
-    if v2:
+    if v3:
+        print("DQ6 NoPrgress fix, v3: Info > All, Forget, and the gold window")
+    elif v2:
         print("DQ6 NoPrgress crash fix, v2: Info > All and Forget")
     else:
         print("DQ6 NoPrgress crash fix, v1: Info > All only")
@@ -619,6 +696,14 @@ def main(argv=None):
         for off, before, after, what in V2_BRANCHES:
             print("      {}   {:02X} -> {:02X}".format(what, before, after))
         print("      opcodes and instruction lengths unchanged, no new code")
+    if v3:
+        print("  restored the gold window on the info screen:")
+        print("      0x{:06X}  {} bytes  the deleted draw call, at exact size"
+              .format(GOLD_CODE_START, len(GOLD_CODE_AFTER)))
+        print("      0x{:06X}   3 bytes  descriptor 58: X=1 Y=1 W=9 "
+              "(cols 1-9, rows 1-3)".format(GOLD_DESC_START))
+        print("      draws string $10, a bare one-byte G, as the other gold")
+        print("      window in the translation already does")
     print("  internal checksum 0x{:04X} -> 0x{:04X} "
           "(complement 0x{:04X})".format(old_checksum, checksum, complement))
     print()
@@ -654,7 +739,13 @@ def main(argv=None):
     print()
     print("  Behavioral testing is still on you: load the result in an "
           "emulator and")
-    if v2:
+    if v3:
+        print("  try Info > All, backing out before the screen finishes, run a "
+              "Forget")
+        print("  conversation, and check that gold shows at the top left of "
+              "the info")
+        print("  screen. Keep savestates the first time you use Forget.")
+    elif v2:
         print("  try Info > All, backing out before the screen finishes, and "
               "run a Forget")
         print("  conversation. Keep savestates the first time you use Forget.")

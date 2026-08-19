@@ -644,3 +644,147 @@ containment works, because it was never called on. This is why the README
 suggests savestates the first time you use Forget.
 
 The unbounded loop is listed as an open defect.
+
+---
+
+# Part three: the gold window
+
+Not a crash. A display the translation lost, restored in v3.
+
+## 1. The fault
+
+The Japanese game draws your gold in a window at the top right of the info
+screen. The English translation draws nothing there.
+
+## 2. How it was found
+
+Two MesenCE traces of the same screen, one per ROM. Every ROM address executed
+during the Japanese trace was collected - 14,839 unique - mapped to file
+offsets, and compared byte for byte against the English ROM.
+
+That reduced the whole problem to **seven regions of divergence in code that
+demonstrably runs**, which is a far narrower target than scanning for
+constants. Scanning has produced false positives on this ROM repeatedly; a
+diff restricted to executed addresses cannot, because every hit is by
+construction code the console ran.
+
+This is the same technique that found the deleted `STA $3AC2` in part one.
+
+## 3. The measured divergence
+
+```
+JAPANESE                          ENGLISH
+$358F  JSL $C3736C                $358F  JSL $C3736C
+$3593  LDA #$007A                 $3593  LDA #$003E
+$3596  JSL $C3763A     <- gone    $3596  JSL $C383FE
+$359A  LDA #$003E                 $359A  PLB / REP / PLY / PLX / PLA / PLP / RTL
+$359D  JSL $C383FE                $35A2  REP / PLY / PLX / PLA / PLP / RTL  <- duplicate
+$35A1  PLB / ... / RTL
+```
+
+Seven bytes deleted, `A9 7A 00 22 3A 76 C3`, and the gap backfilled with a
+duplicated `RTL` epilogue so every downstream address stayed put.
+
+**That is the same padding technique as the `STA $3AC2` deletion**, which sits
+four bytes earlier in the same routine. Two deletions, same method, four bytes
+apart.
+
+Confirmed in both directions: the Japanese trace executes the pair three times,
+once per info-screen open, and the English trace never calls `$C3:763A` with
+`A:007A` anywhere in 3.16 GB.
+
+## 4. The cause, which is not the deletion
+
+Window geometry lives in a descriptor table at **`$C5:7B5C`, 14 bytes per
+entry, indexed by `$3058`**. Gold is entry 58. Bytes 11-13 of each entry are
+the draw routine pointer, which is how the entry was identified: they read
+`8F 35 C3`.
+
+Comparing entry 58 and the status window between ROMs:
+
+```
+Japanese   status cols 10-21   gold cols 22-30    side by side
+English    status cols 10-24   gold cols 16-23    gold inside the status window
+```
+
+English stat labels are wider than Japanese ones. The status window was widened
+to fit them, and the gold window ended up underneath it. **With nowhere left to
+draw, the call was removed.** The deletion is a consequence of the layout
+change, not an independent defect.
+
+This matters for the fix: restoring the seven bytes alone would have drawn a
+`G` into coordinates the status window now covers.
+
+## 5. The fix
+
+Twenty-five bytes.
+
+```
+0x033593   22 bytes   the draw call restored, at exact size
+0x057E88    3 bytes   descriptor 58: X=1, Y=1, W=9  (cols 1-9, rows 1-3)
+```
+
+- **Code.** Written over the English fifteen bytes plus the dead duplicate
+  epilogue, consuming it exactly. No relocation and no expansion space. The
+  write ends at `$35A8`, one byte short of `$35A9`, which is the routine that
+  opens the window.
+- **Position.** Top left, where the English layout has room. Only the gold
+  window's own descriptor changes.
+- **The `G`.** It draws string `$10`, a bare one-byte `G`. Entry `$7A` is not a
+  gold string at all: `$74`-`$7F` are ` A` through ` L`, an alphabet series in
+  which every entry carries an `$88` prefix, and that prefix renders as a stray
+  mark on screen. `$10` is what the translation points its **other** gold window
+  at, so this is their own substitution applied to the site they missed.
+
+## 6. Why it is safe to compose with v1 and v2
+
+Measured, not assumed:
+
+```
+Info > All   0x033538-0x03358F      gold code   0x033593-0x0335A9
+Forget       0x00FDD6-0x00FF36      gold desc   0x057E88-0x057E8B
+```
+
+No overlap anywhere. The gold code begins four bytes after the Info > All span
+ends, and the descriptor is in a different bank from everything else.
+
+Further:
+
+- Only descriptor `$3A` points at `$C3:358F`, so nothing else can enter the
+  rewritten code.
+- Only descriptor `$3A` differs from the stock translation. The status window,
+  the command menu and every other window are byte-identical.
+- The consumed epilogue follows an `RTL`, so nothing falls through to it, and
+  the three `$35A2` byte-patterns elsewhere in the ROM sit in banks `$C9`,
+  `$CD` and `$CF`. A same-bank `JMP` cannot cross banks and the one long call
+  among them carries bank `$CD`, so **none of them can reach `$C3:35A2`**.
+- No text changes. The message payload, the message pointer table and the name
+  table are byte-identical to the stock translation.
+
+## 7. Two wrong readings, and what they cost
+
+Both are recorded because both were confidently held.
+
+**"The labels are too wide, shrink them."** The first theory was that the UI
+glyph table had been abandoned and labels rewritten as blank plus an ordinary
+letter, making them wider. It was dismissed after measuring `HP` and `MP`,
+which are two bytes in both ROMs and genuinely untouched. **Generalising from
+those two labels was the error.** The theory was right about the mechanism -
+entries `$7A` and `$7B` did go from one byte to two - and wrong only about the
+consequence.
+
+**"They missed a site."** The second reading was that the translation had a
+working substitution at its other gold window and simply forgot this one, so
+the fix was seven bytes. Screenshots of both games side by side killed it: the
+English status window visibly occupies the space, so the deletion was
+deliberate. **The screenshots had been available throughout.** Reasoning from
+the disassembly alone produced a confident wrong conclusion that one look would
+have prevented.
+
+The general lesson, which applies to both: the trace work was necessary to find
+the deleted call, and it was not sufficient to say what the deletion meant.
+
+## Status: confirmed in game, 2026-08-18
+
+Gold renders at the top left of the info screen. Info > All confirmed working
+at two party sizes on the same build, and Forget unaffected.
