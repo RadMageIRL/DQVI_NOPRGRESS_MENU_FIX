@@ -1,10 +1,12 @@
 # DQ6 crash fixes, for the NoPrgress translation
 
-Fixes two hard hangs in **Dragon Quest VI: Maboroshi no Daichi** (Super Famicom)
-under the **NoPrgress / DeJap English translation v0.90b2**:
+Fixes three hard hangs in **Dragon Quest VI: Maboroshi no Daichi** (Super
+Famicom) under the **NoPrgress / DeJap English translation v0.90b2**:
 
 - **Info > All**, when you back out before the status screen finishes drawing.
 - **Forget**, in the Remember conversation system.
+- **Tactics equip**, after cycling in and out of a character's equipment. This
+  one is in Enix's original 1995 code, not the translation's.
 
 This repository publishes the patches, the analysis behind them, and a script
 that builds them from your own ROMs.
@@ -15,17 +17,23 @@ that builds them from your own ROMs.
 
 ## Which patch do you want?
 
-Three patches are available. They are a **choice, not a sequence**. v1 and v2
+Four patches are available. They are a **choice, not a sequence**. v1, v2 and v3
 remain available and unchanged; pick the one that matches what you want changed.
 
-| | Info > All | Forget | gold window | changes menu layout |
-|---|---|---|---|---|
-| **v1** | yes | - | - | no |
-| **v2** | yes | yes | - | no |
-| **v3** | yes | yes | yes | **yes** |
+| | Info > All | Forget | Tactics equip | gold window | changes what you see |
+|---|---|---|---|---|---|
+| **v1** | yes | - | - | - | no |
+| **v2** | yes | yes | - | - | no |
+| **v3** | yes | yes | - | yes | **yes** |
+| **v4** | yes | yes | **yes** | yes | **yes** |
 
-**If you want only the crash fixes, take v2.** v3 is the only one that alters
-how a menu looks.
+**v4 is the one to take unless you have a reason not to.** It is the only one
+that fixes the Tactics-equip hang, which affects every other version.
+
+If you want the hang fixes without any visible change, there is no such build:
+the equip fix is in v4, and v4 also carries the gold window. v2 remains the
+choice for "crash fixes only, nothing looks different", at the cost of the equip
+hang.
 
 ### v1 - Info > All only, the conservative option
 
@@ -57,19 +65,59 @@ Despite the name `menufix`, kept for continuity with v1, v2 covers both crashes.
 
 Everything in v2, plus the gold display restored to the info screen.
 
-**This is the only patch here that changes how anything looks.** v1 and v2 are
-invisible until they stop a crash; v3 moves a window. If that is not what you
-want, take v2. Nothing is lost by doing so.
+**v3 and v4 are the patches here that change how anything looks.** v1 and v2 are
+invisible until they stop a crash; v3 moves a window, and v4 carries that plus a
+cursor that can land differently in edge cases. If that is not what you want,
+take v2. What you give up is the equip fix.
 
-No text is changed by any of the three.
+No text is changed by any of the four.
 
 ---
+
+### v4 - adds the Tactics-equip fix
+
+Everything in v3, plus a fix for a hang that **affects every other version of
+this patch, and the unpatched translation, and every build of the script-refill
+patch before v2.0**.
+
+Cycling in and out of a character's equipment through the Tactics menu locks the
+game. It takes repeated cycling to reach, which is why it went unreported for so
+long.
+
+`$C3:1AB1` is a broken duplicate of `$C3:1D0E`. Both answer the same question -
+the cursor is on an entry that cannot be selected, so where should it go - and
+`$C3:1D0E` answers it correctly: it saves the ordinal, honours the carry that
+`$C3:1B1E` returns, checks the floor, and if nothing is below it restores the
+ordinal and searches upward against a ceiling.
+
+`$C3:1AB1` steps back once, unconditionally, and commits whatever comes back.
+One step past zero hands `$C3:1B1E` an ordinal it cannot satisfy. **That routine
+reports the failure correctly** - it is bounded and returns with the carry set -
+and the caller never looks. The sentinel is then packed as a screen position:
+
+```
+linear = (112/2)*16 + 1 = 897     row = 897>>5 = 28     col = 897&31 = 1
+```
+
+The tilemap is `$3068`-`$3767`, exactly 28 rows, so **row 28 is one past the end
+and lands on `$3768` - the cursor bitmap that the same code reads.** It corrupts
+the structure it depends on, which is why the fault sustains itself once it
+starts, and why it needs repeated cycling to trigger.
+
+The fix mirrors `$C3:1D0E`'s search into `$C3:1AB1`. The initial check and the
+redraw are untouched, so ordinary cursor movement is byte-identical.
+
+**One visible behavioural change.** The cursor may land on a different entry than
+before in edge cases, because it now searches down to the floor and up to the
+ceiling instead of stepping back once. That is `$C3:1D0E`'s intended behaviour
+and what the game does everywhere else, but it is a change you can see rather
+than a pure bug fix, so it is stated here rather than buried.
 
 ## Start from the stock ROM, not from a v1 output
 
 **Do not stack these patches.** Each one already contains the ones before it -
-v2 contains v1, and v3 contains v2 - so there is nothing to gain by stacking
-them. Start again from the unmodified NoPrgress ROM.
+v2 contains v1, v3 contains v2, v4 contains v3 - so there is nothing to gain by
+stacking them. Start again from the unmodified NoPrgress ROM.
 
 What actually happens if you try it anyway, measured rather than assumed.
 Applying the v2 **BPS** to a v1 output is refused outright, because BPS records
@@ -88,7 +136,7 @@ general.
 Do not stack patches and then assume it worked. Start from the stock ROM and
 check the SHA-1 of what you get against the table below.
 
-All three patches target the same starting point:
+All four patches target the same starting point:
 
 ```
 Dragon Quest VI with NoPrgress v0.90b2 applied, headerless, 4,194,304 bytes
@@ -115,11 +163,13 @@ wrong.
   which is exactly the kind of place a byte count goes wrong. The Forget defect
   is a memory allocation that collides with the original game's, which is the
   kind of thing that is close to invisible without the original developers'
-  memory map. Both are slips in difficult work, not failings, and the
-  translation is the reason this repository can exist at all.
+  memory map. The Tactics-equip hang is not theirs at all - it is a defect in
+  Enix's own 1995 code, present in the Japanese ROM, which the Japanese data
+  never happens to trigger. All of them are slips in difficult work, not
+  failings, and the translation is the reason this repository can exist at all.
 - **Enix**, publisher of the original 1995 game, whose rights now sit with
-  Square Enix. The fixes add nothing; they put bytes back and move three
-  variables out of the way.
+  Square Enix. The fixes add nothing; they put bytes back, move three variables
+  out of the way, and copy one of Enix's own routines over its broken twin.
 
 ---
 
@@ -153,8 +203,10 @@ savestates handy. It is reproducible on demand once you know the timing, and it
 happens with a **single party member at level 1 with no equipment**, so it is
 not about long names or long item names.
 
-**The Equip menu does not crash.** It has sometimes been described as a second
-crash site; it was tested with the same interrupted sequence and does not fault.
+**The Equip menu does not crash *this way*.** It has sometimes been described as
+a second crash site for the interrupted-draw sequence; it was tested with the
+same timing and does not fault. It does have a separate defect of its own, the
+Tactics-equip hang, which is unrelated to drawing and is described below.
 
 ### Forget
 
@@ -271,9 +323,85 @@ deleted call.
 This is the same technique that found the deleted `STA $3AC2`, and it is much
 narrower than searching for constants.
 
+
+---
+
+## The Tactics-equip hang, and why v4 exists
+
+Cycle in and out of a character's equipment through the Tactics menu enough
+times and the game stops responding. No crash screen, no reset: the music keeps
+playing and nothing accepts input.
+
+**This one is not the translation's.** It is in Enix's 1995 code and it is in the
+Japanese ROM too. The Japanese data never drives it into the failing state, which
+is why it survived thirty years unreported, and it affects **v1, v2 and v3 of
+this patch, the unpatched translation, and every build of the script-refill patch
+before v2.0**.
+
+### What it is
+
+`$C3:1AB1` is a broken duplicate of `$C3:1D0E`. Both answer the same question -
+the cursor is on an entry that cannot be selected, so where should it go - and
+`$C3:1D0E` answers it properly: save the ordinal, honour the carry, check the
+floor, and if there is nothing below, restore and search upward against a
+ceiling.
+
+`$C3:1AB1` steps back once, unconditionally, and commits whatever comes back.
+
+### Why one wrong step is enough
+
+One step past zero asks `$C3:1B1E` for an ordinal it cannot supply. **That
+routine is not at fault** - it is bounded, and it reports failure the way this
+codebase reports failure, by returning with the carry set. Its caller never
+looks. The sentinel is then packed as though it were a screen position:
+
+```
+linear = (112/2)*16 + 1 = 897     row = 897>>5 = 28     col = 897&31 = 1
+```
+
+The tilemap is `$3068`-`$3767`: exactly 28 rows, so `$3068 + 28*64 = $3768`.
+**Row 28 is not merely off the end - it is precisely the cursor bitmap the same
+code reads.** The bad write corrupts the structure the next read depends on,
+which is why it needs repeated cycling to start and why it never recovers once
+it has.
+
+### One producer, four consumers, and why chasing the symptom failed
+
+Four of the eight callers of `$C3:1B1E` honour the carry it returns; four do not,
+and every bit of the damage arrives through those four. Five builds that patched
+consumers each moved the fault to the next one. The producer was right the whole
+time.
+
+The bad write was also doing two jobs at once: it corrupts the tilemap **and** it
+is what parks the cursor off the visible list, nineteen rows below anywhere it
+legitimately goes. Suppressing the write cured the hang and left a cursor drawn
+over the item text, and no in-bounds replacement could restore the parking,
+because the parking only works because the value is out of bounds.
+
+### What v4 does about it
+
+It mirrors `$C3:1D0E`'s search into `$C3:1AB1`. The initial check and the redraw
+are untouched, so ordinary cursor movement is byte-identical and every menu that
+was not faulting behaves exactly as before.
+
+**The one visible change:** in edge cases the cursor may land on a different
+entry than it used to, because it now searches down to the floor and up to the
+ceiling instead of stepping back once. That is `$C3:1D0E`'s behaviour, which is
+what the rest of the game does, but it is a change you can see rather than a
+pure bug fix.
+
+### How it was verified
+
+Confirmed in play, then checked against a trace of the fixed build: the
+out-of-range sentinel reaches none of the four consumers, the ordinal never goes
+negative, nothing writes row 28, and the scan that used to spin exits cleanly on
+every one of its 20 calls.
+
+---
+
 ## How to apply
 
-Two routes, and either works for **any of the three versions**. Route A applies
+Two routes, and either works for **any of the four versions**. Route A applies
 a ready-made patch and needs one ROM. Route B rebuilds from source and needs
 both ROMs.
 
@@ -286,9 +414,10 @@ Use [Flips](https://github.com/Alcaro/Flips). Apply the patch you want to your
 flips --apply dqvi-noprgress-menufix-v1.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 flips --apply dqvi-noprgress-menufix-v2.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 flips --apply dqvi-noprgress-menufix-v3.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
+flips --apply dqvi-noprgress-menufix-v4.bps "DQ6 NoPrgress.sfc" "DQ6 Fixed.sfc"
 ```
 
-**All three patches target the translated ROM (`B545C548`), not the Japanese
+**All four patches target the translated ROM (`B545C548`), not the Japanese
 base, and not each other's output.** BPS records its expected source, so Flips refuses
 a wrong ROM rather than producing a broken one. An IPS is included for tools
 that cannot read BPS, but IPS cannot validate its input at all, so prefer the
@@ -308,6 +437,7 @@ so the command that built v1 still builds v1.
 python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc"
 python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc" --version 2
 python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc" --version 3
+python DQVI_NoPrgress_Menu_Crash_Fix.py --jp "Dragon Quest VI - Maboroshi no Daichi (Japan).sfc" --en "DQ6 NoPrgress.sfc" --version 4
 ```
 
 Python 3.8 or newer, standard library only, no pip and no external tools. It
@@ -321,7 +451,7 @@ here.
 
 ![The fix script running with --version 3 in a clean folder, showing both ROMs verified by SHA-1, the restored STA $3AC2, the twenty-one Forget relocation sites, the gold window restoration at 0x033593 and 0x057E88, the recomputed checksum, and the hashes of all three outputs](screenshots/script-run-v3.png)
 
-v1 and v2 produce the same shape of output, in
+v1, v2 and v4 produce the same shape of output, in
 [screenshots/script-run.png](screenshots/script-run.png) and
 [screenshots/script-run-v2.png](screenshots/script-run-v2.png).
 
@@ -341,6 +471,8 @@ value. Use SHA-1.
 | `dqvi-noprgress-menufix-v2.ips` | 241 | `1c6921aa886d1799a33d000c33f51fda3c7a12bd` |
 | `dqvi-noprgress-menufix-v3.bps` | 233 | `45f1f42f68df186b5c835a198c5a5062b68f5099` |
 | `dqvi-noprgress-menufix-v3.ips` | 279 | `c66eb3a7e40328023f6c697af08179ad485a993a` |
+| `dqvi-noprgress-menufix-v4.bps` | 340 | `7ce5dd6ba324188a4a04b9c3c4f1926ddb9588cb` |
+| `dqvi-noprgress-menufix-v4.ips` | 387 | `4fff01da97631d183c810429ee5c8b39745d0457` |
 
 And the ROMs they produce:
 
@@ -349,6 +481,7 @@ And the ROMs they produce:
 | v1, `DQVI_NoPrgress_MenuFix.sfc` | 4,194,304 | `174D40F8` | `01e417a0036db27fc5a4102e012ceec82c56ca76` |
 | v2, `DQVI_NoPrgress_MenuFix_v2.sfc` | 4,194,304 | `57823516` | `ba222c4b3fcc1c3dbe069272e25bdf33c3fe07a6` |
 | v3, `DQVI_NoPrgress_MenuFix_v3.sfc` | 4,194,304 | `DACF8FD7` | `a4175c168ff83e5031f13040d27c2fd259c64047` |
+| v4, `DQVI_NoPrgress_MenuFix_v4.sfc` | 4,194,304 | `2FF14A56` | `a9e10407284c911bf832875cb5f92769b8405ec7` |
 
 **v1 changes 88 bytes** against the translated ROM:
 
@@ -377,8 +510,25 @@ And the ROMs they produce:
 0x057E88 - 0x057E8B    3 bytes    the gold window's position and width
 ```
 
-Internal checksum goes from `0xD17A` to `0xD208` for v1, `0xD622` for v2, and
-`0xD501` for v3.
+**v4 changes 239 bytes**:
+
+```
+0x00FFDC - 0x00FFE0    4 bytes    recomputed internal checksum and complement
+0x033538 - 0x03358C   84 bytes    the Info > All restoration, identical to v1
+19 sites in bank $C0  38 bytes    relocated operands, identical to v2
+0x00FE27, 0x00FF1D     2 bytes    two branch conditions, identical to v2
+0x033593 - 0x0335A9   22 bytes    the restored gold draw call, identical to v3
+0x057E88 - 0x057E8B    3 bytes    the gold window's position and width, as v3
+0x031ACA - 0x031AD8   14 bytes    JMP to the equip hook, and NOP padding
+0x03FC80 - 0x03FCD4   84 bytes    the equip hook itself, over free space
+```
+
+The equip hook goes in free space at `$C3:FC80`, which held `0xFF` filler. The
+script checks that it is still filler before writing, so it cannot quietly
+overwrite something another patch put there.
+
+Internal checksum goes from `0xD17A` to `0xD208` for v1, `0xD622` for v2,
+`0xD501` for v3, and `0xACE5` for v4.
 NoPrgress shipped a correct checksum, so recomputing it after changing the ROM
 is the right thing to do rather than leaving a stale value behind.
 
@@ -386,8 +536,9 @@ is the right thing to do rather than leaving a stale value behind.
 
 ## What these patches do not fix
 
-These patches fix two specific crashes. Everything else about the translation is
-unchanged, including the following, which are **inherited and out of scope**.
+These patches fix specific crashes and hangs. Everything else about the
+translation is unchanged, including the following, which are **inherited and out
+of scope**.
 
 If you hit any of it, it came with the translation and is not a defect in these
 fixes.
@@ -426,7 +577,7 @@ that has not been exercised in practice.
 
 Any other translation bug, typo, formatting oddity, or behavior not specifically
 named as fixed here remains exactly as NoPrgress shipped it. These patches
-address two crashes and nothing else.
+address the defects named above and nothing else.
 
 ---
 
@@ -502,6 +653,37 @@ branch-condition changes in v2 were not individually isolated: they are in the
 build that was tested, and both are provable no-ops on a healthy path, but no
 build was made with the relocation alone. Reports welcome in the issues.
 
+### v4, the Tactics-equip hang
+
+**Confirmed working in game, 2026-08-20.** Cycling in and out of equipment
+through the Tactics menu, the sequence that used to lock the game, **no longer
+hangs**, and there is **no visual artifact** - which matters, because five
+earlier attempts that patched the wrong end of the problem each left a cursor
+drawn on top of the item text. A build that stops the hang and leaves a stray
+cursor has moved the fault, not fixed it.
+
+Verified afterwards from an instruction-level trace of the fixed build, checking
+the things that would have to be true if the cause were gone rather than
+suppressed:
+
+- **The new search runs and succeeds.** 61 entries, 61 taken `BCC` exits: the
+  carry that the old code ignored is now honoured on every call.
+- **The out-of-range sentinel reaches none of its four consumers.** Zero.
+- **The ordinal never goes negative.** Observed values 0, 1, 4, 5, 8.
+- **Nothing writes row 28**, and `$376B` - the byte in the cursor bitmap that the
+  bad write used to corrupt - holds `$0000` throughout.
+- **The scan that used to spin terminates every time**: 286 reads across 20
+  clean exits, against 122 across 9 for the Japanese ROM on the same activity.
+
+The Japanese ROM was traced alongside as a control. It never enters the failing
+state at all, which is consistent with a defect that has been in the game since
+1995 and that only English data reaches.
+
+**Not verified:** a full playthrough, and emulators other than MesenCE. The
+behavioural change described above is deliberate and is what `$C3:1D0E` does, but
+if you see the cursor land somewhere unexpected after a Tactics-equip cycle, that
+is the change and not a new fault.
+
 ---
 
 ## Reporting a problem
@@ -528,14 +710,16 @@ If the text is in Japanese, or something looks odd but nothing crashed, read
 
 ```
 README.md                          this file
-DQVI_NoPrgress_Menu_Crash_Fix.py   builds any of the three versions from both ROMs, stdlib only
+DQVI_NoPrgress_Menu_Crash_Fix.py   builds any of the four versions from both ROMs, stdlib only
 dqvi-noprgress-menufix-v1.bps      v1 patch, targets the translated ROM B545C548
 dqvi-noprgress-menufix-v1.ips      v1 patch as IPS, for older tools
 dqvi-noprgress-menufix-v2.bps      v2 patch, targets the translated ROM B545C548
 dqvi-noprgress-menufix-v2.ips      v2 patch as IPS, for older tools
 dqvi-noprgress-menufix-v3.bps      v3 patch, targets the translated ROM B545C548
 dqvi-noprgress-menufix-v3.ips      v3 patch as IPS, for older tools
-docs/ANALYSIS.md                   how all three were found, and why the fixes are safe
+dqvi-noprgress-menufix-v4.bps      v4 patch, targets the translated ROM B545C548
+dqvi-noprgress-menufix-v4.ips      v4 patch as IPS, for older tools
+docs/ANALYSIS.md                   how all four were found, and why the fixes are safe
 LICENSE
 ```
 

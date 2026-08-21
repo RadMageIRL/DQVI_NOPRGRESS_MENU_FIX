@@ -136,6 +136,10 @@ OUT_ROM_V2 = "DQVI_NoPrgress_MenuFix_v2.sfc"
 OUT_BPS_V2 = "dqvi-noprgress-menufix-v2.bps"
 OUT_IPS_V2 = "dqvi-noprgress-menufix-v2.ips"
 
+OUT_ROM_V4 = "DQVI_NoPrgress_MenuFix_v4.sfc"
+OUT_BPS_V4 = "dqvi-noprgress-menufix-v4.bps"
+OUT_IPS_V4 = "dqvi-noprgress-menufix-v4.ips"
+
 OUT_ROM_V3 = "DQVI_NoPrgress_MenuFix_v3.sfc"
 OUT_BPS_V3 = "dqvi-noprgress-menufix-v3.bps"
 OUT_IPS_V3 = "dqvi-noprgress-menufix-v3.ips"
@@ -346,9 +350,69 @@ def apply_v2(out):
         out[off] = after
 
 
+
+# ---------------------------------------------------------------------------
+# v4: the Tactics-equip hang
+#
+# Cycling in and out of a character's equipment through the Tactics menu locks
+# the game. It needs repeated cycling to reach, which is why it went unreported.
+#
+# $C3:1AB1 is a broken duplicate of $C3:1D0E. Both answer the same question -
+# the cursor is on an entry that cannot be selected, so where should it go - and
+# $C3:1D0E answers it correctly: it saves the ordinal, honours the carry that
+# $C3:1B1E returns, checks the floor, and if nothing is below it restores the
+# ordinal and searches upward against a ceiling.
+#
+# $C3:1AB1 steps back once, unconditionally, and commits whatever comes back.
+# One step past zero hands $C3:1B1E an ordinal it cannot satisfy. That routine
+# reports the failure correctly - it is bounded at $0070 and returns with carry
+# set - and the caller never looks. The sentinel is packed as a position:
+#
+#     linear = (112/2)*16 + 1 = 897    row = 897>>5 = 28    col = 897&31 = 1
+#
+# The tilemap is $3068-$3767, exactly 28 rows, so row 28 is one past the end and
+# lands on $3768, the cursor bitmap the same code reads. It corrupts the
+# structure it depends on, which is why it sustains itself once started.
+#
+# The fix mirrors $C3:1D0E's search. The initial bit test at $C3:1AC1 and the
+# redraw from $C3:1AD8 are untouched, so the common path is byte-identical.
+#
+# Two deliberate departures from $C3:1D0E: its "nothing found either way" case
+# is BRA $1D57, a self-loop asserting the case cannot happen - it has been
+# observed happening, so this restores the ordinal and redraws instead; and
+# $3000 is reused as the save slot because that is what $C3:1D0E uses here.
+
+NL = chr(10)
+EQUIP_SITE = 0x031ACA
+EQUIP_BEFORE = bytes.fromhex("CEE43AADE43A221E1BC322351CC3")
+EQUIP_HOOK = 0x03FC80
+EQUIP_HOOK_CODE = bytes.fromhex(
+    "ade43a8d0030ade43a221e1bc39035b968373fb01bc3d02ccee43a300280e7ad00308de43aeee43aade43a221e1bc39013b968373fb01bc3d00aade43acda638b00980e122351cc34cd81aad00308de43a4cd81a")
+
+
+def apply_equip(out):
+    """Mirror $C3:1D0E's search into $C3:1AB1. Refuses if the ROM differs."""
+    got = bytes(out[EQUIP_SITE:EQUIP_SITE + len(EQUIP_BEFORE)])
+    if got != EQUIP_BEFORE:
+        raise Fail(
+            "the equip site at 0x{:06X} does not contain the expected "
+            "pre-fix bytes.{}  expected {}{}  found    {}{}  Refusing to write.".format(
+                EQUIP_SITE, NL, EQUIP_BEFORE.hex(), NL, got.hex(), NL))
+    n = len(EQUIP_HOOK_CODE)
+    if any(b != 0xFF for b in out[EQUIP_HOOK:EQUIP_HOOK + n]):
+        raise Fail("0x{:06X} is not free space. Refusing to write.".format(
+            EQUIP_HOOK))
+    out[EQUIP_SITE:EQUIP_SITE + 3] = bytes(
+        [0x4C, EQUIP_HOOK & 0xFF, (EQUIP_HOOK >> 8) & 0xFF])
+    for i in range(3, len(EQUIP_BEFORE)):
+        out[EQUIP_SITE + i] = 0xEA
+    out[EQUIP_HOOK:EQUIP_HOOK + n] = EQUIP_HOOK_CODE
+    return n
+
+
 def apply_fix(jp, en, version=1):
     """Return the fixed image. Neither input is touched."""
-    if version not in (1, 2, 3):
+    if version not in (1, 2, 3, 4):
         raise Fail("unknown version {!r}".format(version))
     if version >= 2:
         check_v2_sites(en)
@@ -380,6 +444,8 @@ def apply_fix(jp, en, version=1):
         apply_v2(out)
     if version >= 3:
         apply_gold(out)
+    if version >= 4:
+        apply_equip(out)
 
     checksum, complement = snes_checksum(out)
     write_checksum(out, checksum, complement)
@@ -641,7 +707,7 @@ def main(argv=None):
                         help="directory for outputs (default: alongside --en)")
     parser.add_argument("--no-patches", action="store_true",
                         help="write only the fixed ROM, no BPS or IPS")
-    parser.add_argument("--version", type=int, choices=(1, 2, 3), default=1,
+    parser.add_argument("--version", type=int, choices=(1, 2, 3, 4), default=1,
                         metavar="N",
                         help="1 = Info > All only (default, the conservative "
                              "option); 2 = also fix the Forget crash; "
@@ -655,14 +721,19 @@ def main(argv=None):
 
     v2 = args.version >= 2
     v3 = args.version >= 3
+    v4 = args.version >= 4
     names = {1: (OUT_ROM, OUT_BPS, OUT_IPS),
              2: (OUT_ROM_V2, OUT_BPS_V2, OUT_IPS_V2),
-             3: (OUT_ROM_V3, OUT_BPS_V3, OUT_IPS_V3)}[args.version]
+             3: (OUT_ROM_V3, OUT_BPS_V3, OUT_IPS_V3),
+             4: (OUT_ROM_V4, OUT_BPS_V4, OUT_IPS_V4)}[args.version]
     out_rom = args.out or os.path.join(outdir, names[0])
     out_bps = os.path.join(outdir, names[1])
     out_ips = os.path.join(outdir, names[2])
 
-    if v3:
+    if v4:
+        print("DQ6 NoPrgress fix, v4: Info > All, Forget, the gold window, "
+              "and the Tactics-equip hang")
+    elif v3:
         print("DQ6 NoPrgress fix, v3: Info > All, Forget, and the gold window")
     elif v2:
         print("DQ6 NoPrgress crash fix, v2: Info > All and Forget")
@@ -704,6 +775,15 @@ def main(argv=None):
               "(cols 1-9, rows 1-3)".format(GOLD_DESC_START))
         print("      draws string $10, a bare one-byte G, as the other gold")
         print("      window in the translation already does")
+    if v4:
+        print("  fixed the Tactics-equip hang at $C3:1AB1:")
+        print("      0x{:06X}  {} bytes  JMP to the hook, then NOP padding"
+              .format(EQUIP_SITE, len(EQUIP_BEFORE)))
+        print("      0x{:06X}  {} bytes  the hook, over verified 0xFF free space"
+              .format(EQUIP_HOOK, len(EQUIP_HOOK_CODE)))
+        print("      mirrors $C3:1D0E: save the ordinal, honour the carry,")
+        print("      search down to the floor, then up to the ceiling")
+        print("      the cursor may land on a different entry in edge cases")
     print("  internal checksum 0x{:04X} -> 0x{:04X} "
           "(complement 0x{:04X})".format(old_checksum, checksum, complement))
     print()
@@ -739,7 +819,15 @@ def main(argv=None):
     print()
     print("  Behavioral testing is still on you: load the result in an "
           "emulator and")
-    if v3:
+    if v4:
+        print("  try Info > All, backing out before the screen finishes, run a "
+              "Forget")
+        print("  conversation, check that gold shows at the top left of the "
+              "info")
+        print("  screen, and cycle in and out of equipment through Tactics "
+              "several")
+        print("  times. Keep savestates the first time you use Forget.")
+    elif v3:
         print("  try Info > All, backing out before the screen finishes, run a "
               "Forget")
         print("  conversation, and check that gold shows at the top left of "

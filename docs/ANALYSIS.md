@@ -1,7 +1,7 @@
-# How all three were found, and why the fixes are safe
+# How all four were found, and why the fixes are safe
 
-Technical write-up of two crashes and one lost display in the NoPrgress DQ6
-translation.
+Technical write-up of two crashes, one hang and one lost display in the
+NoPrgress DQ6 translation.
 
 - **Part one, below:** the **Info > All** hang, and the three-byte restoration
   that fixes it. Shipped in v1, v2 and v3.
@@ -9,13 +9,19 @@ translation.
   variable relocation that fixes it. Shipped in v2 and v3.
 - **[Part three](#part-three-the-gold-window):** the **gold window**, deleted
   from the info screen when the status window was widened for English labels.
-  Shipped in v3 only. Not a crash.
+  Shipped in v3 and v4. Not a crash.
+- **[Part four](#the-fourth-the-tactics-equip-hang):** the **Tactics-equip
+  hang**, and the routine that answers the same question correctly four hundred
+  bytes away. Shipped in v4 only. **Not the translation's defect** - it is in
+  Enix's 1995 code and in the Japanese ROM.
 
-All three are unrelated defects with different shapes. The first is a deleted
+All four are unrelated defects with different shapes. The first is a deleted
 instruction. The second is a memory allocation collision, in which every
 instruction on the fault path is byte-identical to the Japanese original and the
 defect is in *where* the translation put its data. The third is a deletion made
-deliberately, to free space that a wider window had taken.
+deliberately, to free space that a wider window had taken. The fourth is not the
+translation's at all: a broken duplicate of a correct routine, shipped in 1995,
+that only English data reaches.
 
 Measured facts and inferences are labelled separately throughout. Where
 something is a guess, it says so. The refuted hypotheses are kept: they were
@@ -793,3 +799,96 @@ the deleted call, and it was not sufficient to say what the deletion meant.
 
 Gold renders at the top left of the info screen. Info > All confirmed working
 at two party sizes on the same build, and Forget unaffected.
+
+
+---
+
+# The fourth: the Tactics-equip hang
+
+Cycling in and out of a character's equipment through the Tactics menu locks the
+game. It needs repeated cycling to reach, which is why it went unreported. It is
+present in the unpatched translation and in v1, v2 and v3 of this patch.
+
+## What it is
+
+`$C3:1AB1` is a broken duplicate of `$C3:1D0E`. Both answer the same question -
+the cursor is on an entry that cannot be selected, so where should it go.
+
+`$C3:1D0E` answers it correctly:
+
+```
+LDA $3AE4 / STA $3000       save the ordinal
+LDA $3AE4 / JSL $C31B1E
+BCC found                   honour the carry
+LDA $3768,Y / AND mask / BNE found
+DEC $3AE4 / BMI up          floor check
+BRA down
+up:  LDA $3000 / STA $3AE4  restore, search upward
+     INC $3AE4 / ... / CMP $38A6 / BCS none    ceiling check
+```
+
+`$C3:1AB1` does none of that. It steps back once, unconditionally, and commits.
+
+## Why one step is enough to break it
+
+One step past zero hands `$C3:1B1E` an ordinal it cannot satisfy. **That routine
+is not at fault.** It is bounded with `CPY #$0070`, and it reports failure the
+way this codebase reports failure: it returns with the carry set, leaving `Y` at
+the bound. The caller never tests it.
+
+The sentinel is then packed as though it were a screen position:
+
+```
+linear = (112/2)*16 + 1 = 897     row = 897>>5 = 28     col = 897&31 = 1
+```
+
+The tilemap is `$3068`-`$3767`, exactly 28 rows, so `$3068 + 28*64 = $3768`.
+**Row 28 is not merely out of range - it is precisely the cursor bitmap that the
+same code reads.** The write corrupts the structure the next read depends on, so
+the fault sustains itself once started.
+
+## What made it hard
+
+**One producer that gets it right, four consumers that do not check.** Four of
+the eight callers of `$C3:1B1E` honour its carry; four do not, and all the damage
+came through those four: the packer calls at `$C3:1AD4` and `$C3:16EE`, the bit
+test at `$C3:1AC1`, and the unbounded scan at `$C3:1B6E`. Patching any one of
+them moved the symptom to the next.
+
+**And the bad write was doing two jobs.** Row 28 corrupts the tilemap, and it is
+also nineteen rows below anywhere the cursor legitimately goes, which is how the
+original gets the cursor off the visible list. Removing the write fixed the hang
+and left a cursor drawn over the item text; no in-bounds substitute could restore
+the parking, because the parking works only because the value is out of bounds.
+
+## The fix
+
+Mirror `$C3:1D0E`'s search into `$C3:1AB1`. `$C3:1AC1`-`$1AC9` and everything
+from `$1AD8` are untouched, so the common path is byte-identical and ordinary
+cursor movement is unaffected.
+
+Two deliberate departures from `$C3:1D0E`:
+
+- its "found nothing in either direction" case is `BRA $1D57`, a self-loop
+  asserting the case cannot happen. It has been observed happening, so this
+  restores the saved ordinal and redraws instead. Answering a hang with a hang
+  would be no answer.
+- `$3000` is reused as the save slot because that is what `$C3:1D0E` uses for
+  this operation. The two paths are different menus and cannot be live at once.
+
+## Behavioural change
+
+**The cursor may land on a different entry than before in edge cases**, because
+it now searches down to the floor and up to the ceiling instead of stepping back
+once. That is `$C3:1D0E`'s intended behaviour and what the game does everywhere
+else, but it is visible, and it is a change rather than a pure fix.
+
+## Verification
+
+Confirmed in play, then verified from a trace of the fixed build: the sentinel
+reaches none of the four consumers, the ordinal never goes negative, nothing
+writes row 28, `$376B` holds only `$0000`, and the scan exits cleanly on every
+call - 286 reads across 20 calls, against the Japanese ROM's 122 across 9.
+
+The Japanese ROM never enters the fault. Its data never drives the ordinal below
+the valid range, so `$C3:1B1E` is never asked a question it cannot answer.
