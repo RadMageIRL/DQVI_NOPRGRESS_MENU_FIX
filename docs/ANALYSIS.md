@@ -10,7 +10,7 @@ NoPrgress DQ6 translation.
 - **[Part three](#part-three-the-gold-window):** the **gold window**, deleted
   from the info screen when the status window was widened for English labels.
   Shipped in v3 and v4. Not a crash.
-- **[Part four](#the-fourth-the-tactics-equip-hang):** the **Tactics-equip
+- **[Part four](#part-four-the-tactics-equip-hang):** the **Tactics-equip
   hang**, and the routine that answers the same question correctly four hundred
   bytes away. Shipped in v4 only. **Not the translation's defect** - it is in
   Enix's 1995 code and in the Japanese ROM.
@@ -803,7 +803,7 @@ at two party sizes on the same build, and Forget unaffected.
 
 ---
 
-# The fourth: the Tactics-equip hang
+# Part four: the Tactics-equip hang
 
 Cycling in and out of a character's equipment through the Tactics menu locks the
 game. It needs repeated cycling to reach, which is why it went unreported. It is
@@ -883,9 +883,15 @@ it now searches down to the floor and up to the ceiling instead of stepping back
 once. That is `$C3:1D0E`'s intended behaviour and what the game does everywhere
 else, but it is visible, and it is a change rather than a pure fix.
 
-## Verification
+## Status: confirmed in game, 2026-08-20
 
-Confirmed in play, then verified from a trace of the fixed build: the sentinel
+Cycling in and out of equipment through the Tactics menu, the sequence that used
+to lock the game, **no longer hangs, and leaves no visual artifact**. The second
+half matters: five earlier builds stopped the hang and left a cursor drawn over
+the item text, so "no hang" on its own would not have told a fix apart from a
+moved fault.
+
+Verified afterwards from a trace of the fixed build: the sentinel
 reaches none of the four consumers, the ordinal never goes negative, nothing
 writes row 28, `$376B` holds only `$0000`, and the scan exits cleanly on every
 call - 286 reads across 20 calls, against the Japanese ROM's 122 across 9.
