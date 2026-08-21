@@ -6,7 +6,7 @@ Famicom) under the **NoPrgress / DeJap English translation v0.90b2**:
 - **Info > All**, when you back out before the status screen finishes drawing.
 - **Forget**, in the Remember conversation system.
 - **Tactics equip**, after cycling in and out of a character's equipment. This
-  one is in Enix's original 1995 code, not the translation's.
+  one is in Enix's original 1995 code, not the translation's. But triggered by longer EN strings/font.
 
 This repository publishes the patches, the analysis behind them, and a script
 that builds them from your own ROMs.
